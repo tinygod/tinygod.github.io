@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>棱光叠塔 Prism Stack</title>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#111;overscroll-behavior:none;touch-action:manipulation;-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;-webkit-tap-highlight-color:transparent;font-family:-apple-system,"PingFang SC",sans-serif;color:#fff}
+body{position:fixed;inset:0;height:100dvh}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.ui{position:fixed;left:0;right:0;pointer-events:none;text-align:center}
+#hud{top:calc(env(safe-area-inset-top) + 12px)}
+#score{font-size:56px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
+#combo{font-size:24px;font-weight:700;color:#ffd34d;margin-top:20px;height:30px;opacity:0}
+#combo.play{animation:pf .95s forwards}
+@keyframes pf{0%{opacity:1;transform:scale(.6)}10%{transform:scale(1.15)}16%{transform:scale(1)}79%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-12px)}}
+.screen{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center}
+#start h1{font-size:40px;font-weight:700;margin:calc(env(safe-area-inset-top) + 140px) 0 0}
+.bestl{font-size:20px;color:#bbb;margin-top:14px}
+#hint{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 24px);width:240px;height:56px;border:2px solid #fff;border-radius:28px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;font-size:20px;animation:br 1.2s ease-in-out infinite}
+@keyframes br{50%{opacity:.4}}
+#over{background:rgba(0,0,0,.35)}
+.card{margin-top:calc(env(safe-area-inset-top) + 56px);width:min(310px,84vw);background:rgba(255,255,255,.92);color:#222;border-radius:20px;padding:28px 0;text-align:center;position:relative}
+.card .lab{font-size:16px;color:#555}.card #fs{font-size:64px;font-weight:700;font-variant-numeric:tabular-nums;margin:6px 0}
+.card .bestl{color:#666}
+#nr{position:absolute;right:24px;top:52px;background:#ffd34d;color:#222;font-size:12px;font-weight:700;padding:4px 10px;border-radius:12px;animation:bo .3s}
+@keyframes bo{0%{transform:scale(0)}70%{transform:scale(1.25)}100%{transform:scale(1)}}
+.btns{position:absolute;bottom:calc(env(safe-area-inset-bottom) + 24px);display:flex;flex-direction:column;align-items:center;transition:opacity .5s}
+.btns.lock{opacity:.5}
+button{font-family:inherit;border:0;-webkit-appearance:none}
+#share{width:160px;height:44px;border-radius:22px;background:#fff;color:#222;font-size:17px;margin-bottom:16px}
+#again{width:310px;max-width:84vw;height:56px;border-radius:28px;background:#333;color:#fff;font-size:20px;font-weight:700}
+#tut{position:fixed;pointer-events:none;text-align:center;font-size:16px;transform:translateX(-50%);transition:opacity .4s}
+#tut i{display:block;margin:0 auto 6px;width:28px;height:28px;border:3px solid #fff;border-radius:50%;animation:pu 1s infinite}
+@keyframes pu{50%{transform:scale(1.3);opacity:.5}}
+.hide{display:none!important}
+</style><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&display=swap" rel="stylesheet">
+<style>
+body,button{font-family:"Fredoka",-apple-system,"PingFang SC",sans-serif}
+#start h1,#over .lab{font-weight:600}#score,#fs,.bestl,#combo{font-weight:500}#combo{font-weight:600}
+button{transition:transform .12s}button.pr{transform:scale(.95);transition:none}
+#tools{position:fixed;top:calc(env(safe-area-inset-top) + 12px);right:calc(env(safe-area-inset-right) + 12px);display:flex;gap:8px;z-index:5}
+#tools button{min-width:44px;height:44px;border-radius:22px;background:rgba(255,255,255,.2);color:#fff;font-size:16px;padding:0 12px}
+</style></head><body>
+<canvas id="c"></canvas>
+<div id="tools"><button id="theme">暮光</button><button id="mute">🔊</button></div>
+<div id="hud" class="ui hide"><div id="score">0</div><div id="combo"></div></div>
+<div id="tut" class="hide"><i></i>点击放下</div>
+<div id="start" class="screen"><h1 id="title"></h1><div id="sbest" class="bestl"></div><div id="hint">点击任意处开始</div></div>
+<div id="over" class="screen hide"><div class="card"><div class="lab">本局得分</div><span id="nr" class="hide">新纪录!</span><div id="fs">0</div><div id="fb" class="bestl"></div></div>
+<div class="btns" id="btns"><button id="share">分享</button><button id="again">再来一次</button></div></div>
+<script>
+(function(){
+var GAME_TITLE='棱光叠塔 Prism Stack';
+var $=function(i){return document.getElementById(i)};
+document.title=GAME_TITLE;$('title').textContent=GAME_TITLE;
+var LS=localStorage;function lsg(k){try{return LS.getItem(k)}catch(e){return null}}function lss(k,v){try{LS.setItem(k,v)}catch(e){}}
+var THEMES=[{n:'暮光',a:'#2B1B4A',b:'#E86A92',L:60},{n:'薄荷',a:'#A8E6CF',b:'#3D84A8',L:60},{n:'夜海',a:'#0F2027',b:'#2C5364',L:55}];
+var theme=+(lsg('stack_theme')||0)%3,muted=lsg('stack_muted')==='1';
+var best=+(lsg('stack_best')||0),onb=!lsg('stack_onboarded'),lockUntil=0,prevBest=0;
+var cv=$('c'),ctx=cv.getContext('2d'),W,H,dpr;
+function resize(){dpr=window.devicePixelRatio||1;W=innerWidth;H=innerHeight;cv.width=W*dpr;cv.height=H*dpr;}
+addEventListener('resize',resize);resize();
+// ---------- audio ----------
+var ac=null,master=null,noiseBuf=null;
+function unlock(){if(!ac){try{ac=new(window.AudioContext||window.webkitAudioContext)();master=ac.createGain();master.gain.value=muted?0:0.8;master.connect(ac.destination);
+ noiseBuf=ac.createBuffer(1,ac.sampleRate*0.05,ac.sampleRate);var d=noiseBuf.getChannelData(0);for(var i=0;i<d.length;i++)d[i]=Math.random()*2-1;}catch(e){}}
+ if(ac&&ac.state==='suspended')ac.resume();}
+function env(g,t,v,d){g.gain.setValueAtTime(0.0001,t);g.gain.linearRampToValueAtTime(v,t+0.005);g.gain.exponentialRampToValueAtTime(0.0001,t+d);}
+function osc(type,f0,f1,d,v,lp0,lp1,delay){if(!ac)return;var t=ac.currentTime+(delay||0),o=ac.createOscillator(),g=ac.createGain(),out=g;o.type=type;o.frequency.setValueAtTime(f0,t);if(f1)o.frequency.exponentialRampToValueAtTime(f1,t+d);
+ env(g,t,v,d);o.connect(g);if(lp0){var f=ac.createBiquadFilter();f.type='lowpass';f.frequency.setValueAtTime(lp0,t);if(lp1)f.frequency.exponentialRampToValueAtTime(lp1,t+d);g.connect(f);out=f;}out.connect(master);o.start(t);o.stop(t+d+0.02);}
+function noise(d,v,lp){if(!ac)return;var t=ac.currentTime,s=ac.createBufferSource(),g=ac.createGain(),f=ac.createBiquadFilter();s.buffer=noiseBuf;f.type='lowpass';f.frequency.value=lp;env(g,t,v,d);s.connect(f);f.connect(g);g.connect(master);s.start(t);s.stop(t+d+0.01);}
+var SFX={place:function(){osc('triangle',220,110,.12,.4);noise(.03,.15,800);},
+ perfect:function(c){var f=523.25*Math.pow(2,Math.min(c,12)/12);osc('sine',f,0,.25,.35);osc('triangle',f*2,0,.25,.35*.3);},
+ fail:function(){osc('sawtooth',300,60,.5,.3,1200,200);},
+ button:function(){osc('square',880,0,.04,.15,3000);},
+ brk:function(){osc('sine',440,330,.15,.2);}};
+// ---------- game ----------
+var ZC=0,maxCombo=0,layers=0,BH,INITW,DEP,stack,cur,falls,rings,score,combo,state='start',cam=0,camT=0,flash=0,last=0,failT=-1,zoom=1,zoomT=1,zoomY=0;
+function col(i,dl){var L=THEMES[theme].L+(dl||0);return 'hsl('+((200+i*5)%360)+',65%,'+L+'%)';}
+function speedFor(n){var s=Math.min(2.5,Math.pow(1.03,n));if(n>40)s*=1+(Math.random()*.3-.15);return s;}
+function spawn(){var top=stack[stack.length-1],n=stack.length-7,dir=n%2?1:-1;
+ cur={x:top.x,w:top.w,y:top.y-BH,i:top.i+1,dir:dir,t:0,spd:speedFor(n-1),ease:n>20&&Math.random()<.3};posCur();}
+function posCur(){var p=cur.t%2;p=p>1?2-p:p;if(cur.ease)p=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;if(cur.dir<0)p=1-p;cur.x=-cur.w*0.5+p*(W);}
+function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=INITW*0.5;var x0=(W-INITW)/2-DEP*0.3;
+ stack=[];for(var k=7;k>=0;k--)stack.push({x:x0,w:INITW,y:H*0.62+k*BH,i:0});
+ falls=[];rings=[];score=0;combo=0;maxCombo=0;layers=0;cam=camT=0;failT=-1;zoom=zoomT=1;zoomY=0;spawn();$('score').textContent=0;}
+function showCombo(t){var c=$('combo');c.textContent=t;c.classList.remove('play');void c.offsetWidth;c.classList.add('play');}
+function drop(){var top=stack[stack.length-1],c=cur,d=c.x-top.x;
+ if(Math.abs(d)<=4){combo++;if(combo>maxCombo)maxCombo=combo;c.x=top.x;if(combo>=2){var nw=Math.min(INITW,c.w*1.04);c.x-=(nw-c.w)/2;c.w=nw;}score+=3;flash=1;
+  showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');SFX.perfect(combo);rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i},t:0});if(combo>=3)rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i},t:-0.08});}
+ else{if(combo>0)SFX.brk();combo=0;var l=Math.max(c.x,top.x),r=Math.min(c.x+c.w,top.x+top.w),nw=r-l;
+  if(nw<=0){falls.push(mkFall(c.x,c.w,c));cur=null;return gameOver();}
+  if(c.x<l)falls.push(mkFall(c.x,l-c.x,c,-1));else falls.push(mkFall(r,c.x+c.w-r,c,1));
+  c.x=l;c.w=nw;score+=1;SFX.place();}
+ layers++;stack.push({x:c.x,w:c.w,y:c.y,i:c.i});$('score').textContent=score;
+ if(onb){onb=false;lss('stack_onboarded','1');$('tut').style.opacity=0;setTimeout(function(){$('tut').classList.add('hide')},400);}
+ var sy=c.y+camT;if(sy<H*0.45)camT+=H*0.45-sy;spawn();}
+function mkFall(x,w,c,s){s=s||(Math.random()<.5?-1:1);return{x:x,w:w,y:c.y,vy:0,vx:60*s,r:0,vr:s*Math.PI/2,i:c.i,t:0};}
+function gameOver(){state='over';failT=0;prevBest=best;SFX.fail();if(navigator.vibrate)navigator.vibrate(40);
+ if(score>best){best=score;lss('stack_best',best);}
+ setTimeout(function(){ // zoom out to whole tower
+  var topY=stack[stack.length-1].y-DEP*0.35,botY=stack[7].y+BH*3,hgt=botY-topY+60,rT=H*0.40,rB=H*0.80;zoomT=Math.max(0.12,Math.min(0.75,(rB-rT)/hgt));ZC=(rT+rB)/2;camT=ZC-(topY+botY)/2;},600);
+ setTimeout(function(){$('fs').textContent=score;$('fb').textContent='最高分 '+best;$('nr').classList.toggle('hide',!(score>prevBest));
+  $('share').classList.toggle('hide',!navigator.share);$('hud').classList.add('hide');$('tut').classList.add('hide');$('over').classList.remove('hide');$('tools').classList.remove('hide');
+  lockUntil=Date.now()+500;$('btns').classList.add('lock');setTimeout(function(){$('btns').classList.remove('lock')},500);},1400);}
+function start(){reset();state='play';['start','over','tools'].forEach(function(i){$(i).classList.add('hide')});$('hud').classList.remove('hide');$('combo').classList.remove('play');
+ if(onb){var t=$('tut');t.classList.remove('hide');t.style.opacity=1;t.style.left=(W/2)+'px';t.style.top=(cur.y+BH+DEP*0.35+30)+'px';}}
+function applyTheme(){$('theme').textContent=THEMES[theme].n;$('mute').textContent=muted?'🔇':'🔊';if(master)master.gain.value=muted?0:0.8;}
+function pressBtn(b){b.classList.add('pr');setTimeout(function(){b.classList.remove('pr')},16);}
+function press(e){if(e.cancelable)e.preventDefault();unlock();var tg=e.target,id=tg&&tg.id;
+ if(tg&&tg.tagName==='BUTTON'){pressBtn(tg);}
+ if(id==='theme'){theme=(theme+1)%3;lss('stack_theme',theme);applyTheme();SFX.button();return;}
+ if(id==='mute'){muted=!muted;lss('stack_muted',muted?'1':'0');applyTheme();SFX.button();return;}
+ if(state==='start'){start();return;}
+ if(state==='over'){if(Date.now()<lockUntil)return;if(id==='again'){SFX.button();start();}else if(id==='share'){SFX.button();navigator.share({title:GAME_TITLE,text:'我在《棱光叠塔》拿到了 '+score+' 分，最高 '+maxCombo+' 连 Perfect！你能叠多高？',url:location.href}).catch(function(){});}return;}
+ if(state==='play'&&cur)drop();}
+var lt=0;document.addEventListener('touchstart',function(e){lt=Date.now();press(e)},{passive:false});
+document.addEventListener('mousedown',function(e){if(Date.now()-lt<600)return;press(e)});
+['touchmove','touchend','gesturestart','dblclick','contextmenu'].forEach(function(t){document.addEventListener(t,function(e){if(e.cancelable)e.preventDefault()},{passive:false})});
+document.addEventListener('keydown',function(e){if(e.code==='Space'){unlock();if(state==='play')drop();else if(state==='start'||Date.now()>=lockUntil)start();}});
+// ---------- render ----------
+function cube(x,y,w,i,a){var dx=DEP*0.6,dy=DEP*0.35;ctx.globalAlpha=a==null?1:a;
+ ctx.fillStyle=col(i,-10);ctx.fillRect(x,y,w,BH);
+ ctx.fillStyle=col(i,-20);ctx.beginPath();ctx.moveTo(x+w,y);ctx.lineTo(x+w+dx,y-dy);ctx.lineTo(x+w+dx,y-dy+BH);ctx.lineTo(x+w,y+BH);ctx.fill();
+ ctx.fillStyle=col(i,0);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y-dy);ctx.lineTo(x+w+dx,y-dy);ctx.lineTo(x+w,y);ctx.fill();ctx.globalAlpha=1;}
+function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
+ if(state==='play'&&cur){cur.t+=dt*cur.spd;posCur();}
+ cam+=(camT-cam)*0.1;zoom+=(zoomT-zoom)*Math.min(1,dt*5);
+ ctx.setTransform(dpr,0,0,dpr,0,0);var T=THEMES[theme],g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,T.a);g.addColorStop(1,T.b);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+ ctx.save();
+ if(failT>=0){failT+=dt;if(failT<0.6){var ang=3*Math.PI/180*Math.sin(25*failT)*Math.exp(-4*failT);ctx.translate(W/2,H/2);ctx.rotate(ang);ctx.translate(-W/2,-H/2);}}
+ if(zoom<0.999){ctx.translate(W/2,ZC);ctx.scale(zoom,zoom);ctx.translate(-W/2,-ZC);}
+ ctx.translate(0,cam);
+ var b0=stack[0];ctx.fillStyle=col(0,-10);ctx.fillRect(b0.x,b0.y+BH,b0.w,H*3);ctx.fillStyle=col(0,-20);ctx.beginPath();ctx.moveTo(b0.x+b0.w,b0.y);ctx.lineTo(b0.x+b0.w+DEP*.6,b0.y-DEP*.35);ctx.lineTo(b0.x+b0.w+DEP*.6,b0.y+H*3);ctx.lineTo(b0.x+b0.w,b0.y+H*3);ctx.fill();
+ for(var i=0;i<stack.length;i++){var s=stack[i];cube(s.x,s.y,s.w,s.i);}
+ if(cur&&state==='play')cube(cur.x,cur.y,cur.w,cur.i);
+ for(i=falls.length-1;i>=0;i--){var f=falls[i];f.t+=dt;f.vy+=1800*dt;f.y+=f.vy*dt;f.x+=f.vx*dt;f.r+=f.vr*dt;
+  ctx.save();ctx.translate(f.x+f.w/2,f.y+BH/2);ctx.rotate(f.r);cube(-f.w/2,-BH/2,f.w,f.i,Math.max(0,1-f.t/0.8));ctx.restore();if(f.t>0.8)falls.splice(i,1);}
+ for(i=rings.length-1;i>=0;i--){var r=rings[i];r.t+=dt;if(r.t<0)continue;var p=Math.min(1,r.t/0.35),e=1-Math.pow(1-p,3),sc=1+0.4*e,b=r.b,dx=DEP*.6,dy=DEP*.35,cx=b.x+(b.w+dx)/2,cy2=b.y-dy/2;
+  ctx.save();ctx.translate(cx,cy2);ctx.scale(sc,sc);ctx.translate(-cx,-cy2);var f=1-p*p,al=f,lw=Math.max(0.01,6*f)/sc;/* 缩放用 ease-out(e)；透明度/线宽用 1-p² 淡出，保证 350ms 全程可见 */ctx.beginPath();ctx.moveTo(b.x,b.y);ctx.lineTo(b.x+dx,b.y-dy);ctx.lineTo(b.x+b.w+dx,b.y-dy);ctx.lineTo(b.x+b.w,b.y);ctx.closePath();
+  ctx.globalAlpha=al;ctx.shadowColor='rgba(255,255,255,.9)';ctx.shadowBlur=12;ctx.strokeStyle=col(b.i||0,25);ctx.lineWidth=lw;ctx.stroke();ctx.shadowBlur=6;ctx.strokeStyle='#fff';ctx.lineWidth=lw*0.5;ctx.stroke();ctx.globalAlpha=1;ctx.restore();if(p>=1)rings.splice(i,1);}
+ ctx.restore();
+ if(flash>0){ctx.fillStyle='rgba(255,255,255,'+flash*.15+')';ctx.fillRect(0,0,W,H);flash-=dt*4;}
+ requestAnimationFrame(frame);}
+$('sbest').textContent=best?'最高分 '+best:'';applyTheme();reset();requestAnimationFrame(frame);
+})();
+</script></body></html>
