@@ -332,7 +332,10 @@ function drop(){
    normalSuccessStreak++;
    if(normalSuccessStreak>=3){addSpectrum(c.h);normalSuccessStreak=0;}
   }
-  layers++;stack.push({x:c.x,w:c.w,y:c.y,i:c.i,h:c.h});$('score').textContent=score;
+  layers++;stack.push({x:c.x,w:c.w,y:c.y,i:c.i,h:c.h});
+  // Update prism position to track tower top
+  prism.y=c.y;prism.x=c.x+(c.w-prism.w)/2;
+  $('score').textContent=score;
   if(onb){onb=false;lss('stack_onboarded','1');$('tut').style.opacity=0;setTimeout(function(){$('tut').classList.add('hide')},400);}
   var sy=c.y+camT;if(sy<H*0.45)camT+=H*0.45-sy;
   if(layers===3){splitTower();}else{spawn();}
@@ -499,7 +502,16 @@ function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
  ctx.translate(0,cam);
  if(phase==='single'){var b0=stack[0];ctx.fillStyle=col(0,-10);ctx.fillRect(b0.x,b0.y+BH,b0.w,H*3);ctx.fillStyle=col(0,-20);ctx.beginPath();ctx.moveTo(b0.x+b0.w,b0.y);ctx.lineTo(b0.x+b0.w+DEP*.6,b0.y-DEP*.35);ctx.lineTo(b0.x+b0.w+DEP*.6,b0.y+H*3);ctx.lineTo(b0.x+b0.w,b0.y+H*3);ctx.fill();
   for(var i=0;i<stack.length;i++){var s=stack[i];cubeH(s.x,s.y,s.w,s.h||200);}
-  if(cur&&state==='play')cubeH(cur.x,cur.y,cur.w,cur.h);}
+  // Draw idle prism in single phase (darker, centered on tower)
+  drawPrism();
+  // Draw beam from prism UP to moving slab
+  if(cur&&state==='play'){
+   var px=prism.x+prism.w/2,py=prism.y+prism.h/2;
+   var cx=cur.x+cur.w/2,cy=cur.y+BH/2;
+   drawBeam(px,py,cx,cy,cur.h,.3);
+   cubeH(cur.x,cur.y,cur.w,cur.h);
+  }
+ }
  else{var base=stackL.length>0?stackL[0]:stackR[0];ctx.fillStyle=col(0,-10);ctx.fillRect(base.x,base.y+BH,W,H*3);
   for(var j=0;j<stackL.length;j++){var sL=stackL[j];cubeH(sL.x,sL.y,sL.w,sL.h||200);}
   for(var k=0;k<stackR.length;k++){var sR=stackR[k];cubeH(sR.x,sR.y,sR.w,sR.h||200);}
