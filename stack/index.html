@@ -74,7 +74,7 @@ function osc(type,f0,f1,d,v,lp0,lp1,delay){if(!ac)return;var t=ac.currentTime+(d
 function noise(d,v,lp){if(!ac)return;var t=ac.currentTime,s=ac.createBufferSource(),g=ac.createGain(),f=ac.createBiquadFilter();s.buffer=noiseBuf;f.type='lowpass';f.frequency.value=lp;env(g,t,v,d);s.connect(f);f.connect(g);g.connect(master);s.start(t);s.stop(t+d+0.01);}
 var SFX={place:function(){osc('triangle',220,110,.12,.4);noise(.03,.15,800);},
  perfect:function(c){var f=523.25*Math.pow(2,Math.min(c,12)/12);osc('sine',f,0,.25,.35);osc('triangle',f*2,0,.25,.35*.3);},
- dualPerfect:function(){osc('sine',659.25,0,.3,.4);osc('triangle',659.25*2,0,.3,.4*.3);osc('sine',880,0,.3,.35,0,0,.08);},
+ dualPerfect:function(){osc('sine',659.25,0,.3,.4);osc('triangle',659.25*2,0,.3,.12);osc('sine',880,0,.3,.35,0,0,.08);osc('triangle',880*2,0,.3,.12,0,0,.08);},
  split:function(){osc('sine',880,1760,.25,.3);noise(.08,.2,2400);},
  towerOut:function(){osc('sawtooth',400,150,.35,.25,1400,400);},
  burst:function(){for(var i=0;i<6;i++)osc('sine',523.25*Math.pow(2,i/12),0,.15,.25,0,0,i*.05);osc('triangle',1046.5,0,.4,.3,0,0,.3);},
@@ -85,6 +85,25 @@ var SFX={place:function(){osc('triangle',220,110,.12,.4);noise(.03,.15,800);},
 var ZC=0,maxCombo=0,layers=0,BH,INITW,DEP,stack,stackL,stackR,cur,curL,curR,falls,rings,score,combo,state='start',cam=0,camT=0,flash=0,last=0,failT=-1,zoom=1,zoomT=1,zoomY=0;
 var phase='single',prism=null,spectrum=[0,0,0,0,0,0],burstCount=0,leftAlive=true,rightAlive=true,tutShown={};
 var SPEC_HUES=[0,30,60,120,210,270];
+var normalSuccessStreak=0,splitInitWidthL=0,splitInitWidthR=0,phaseOffset=0,postSplitLayers=0;
+// ========== APPROVED REMIX RULES CONSTANTS ==========
+// Perfect thresholds (px): layers 1-3: 4px; layers 4-6: 8px; layer 7+: 4px
+var PERFECT_THRESHOLD_NORMAL=4,PERFECT_THRESHOLD_SYNC=8;
+// Sync phase (layers 4-6): same phase both sides, 0.85× speed, 8px threshold
+var SYNC_LAYERS=3,SYNC_SPEED_MULT=0.85;
+// Phase offset from layer 7+: phaseDeg = min(90, 15 * (1 + floor((n-7)/3)))
+// Layers 7-9: 15°, 10-12: 30°, 13-15: 45°, 16-18: 60°, 19-21: 75°, 22+: 90°
+var MAX_PHASE_OFFSET_DEG=90;
+// Post-loss speed reduction: next 2 layers ×0.90
+var POST_LOSS_SPEED_MULT=0.90,POST_LOSS_DURATION=2;
+// Burst recovery: 70% gap recovery (both alive), 60% revive (one dead)
+var BURST_RECOVER_PCT=0.7,BURST_REVIVE_PCT=0.6;
+// Split width: min(preTopW × 0.48, screenW × 0.28)
+var SPLIT_WIDTH_RATIO=0.48,SPLIT_WIDTH_SCREEN_CAP=0.28;
+// Sweep reachability: both beams must reach their tower's Perfect point
+// Layout: shared base + center prism + two columns
+// Left/right bars swing only above their own tower, no center overlap
+// Verified: width=390, 3-Perfect split → both xL/xR inside sweep, synced dual-perfect window exists
 function col(i,dl){var L=THEMES[theme].L+(dl||0);return 'hsl('+((200+i*5)%360)+',65%,'+L+'%)';}
 function colH(h,dl){var L=THEMES[theme].L+(dl||0);return 'hsl('+h+',65%,'+L+'%)';}
 function hueDiff(h1,h2){var d=Math.abs(h1-h2);return Math.min(d,360-d);}
@@ -92,76 +111,298 @@ function speedFor(n){var s=Math.min(2.5,Math.pow(1.03,n));if(n>40)s*=(1+(Math.ra
 function spawn(){
  if(phase==='single'){var top=stack[stack.length-1],n=stack.length-7,dir=n%2?1:-1;
   cur={x:top.x,w:top.w,y:top.y-BH,i:top.i+1,dir:dir,t:0,spd:speedFor(n-1),ease:n>20&&Math.random()<.3,h:(200+top.i*5)%360};posCur();}
- else{var maxN=Math.max(stackL.length,stackR.length)-7,spd=speedFor(maxN-1),yL=leftAlive?stackL[stackL.length-1].y-BH:0,yR=rightAlive?stackR[stackR.length-1].y-BH:0;
-  if(leftAlive){var topL=stackL[stackL.length-1];curL={x:topL.x,w:topL.w,y:yL,i:topL.i+1,dir:1,t:0,spd:spd,ease:maxN>20&&Math.random()<.3,h:(topL.h+5)%360};}
-  if(rightAlive){var topR=stackR[stackR.length-1];curR={x:topR.x,w:topR.w,y:yR,i:topR.i+1,dir:1,t:0,spd:spd,ease:maxN>20&&Math.random()<.3,h:(topR.h+5)%360};}
+ else{
+  var maxN=Math.max(stackL.length,stackR.length)-7;
+  var baseSpd=speedFor(maxN-1);
+  // Layers 4-6 (postSplitLayers 1-3): 0.85× speed
+  if(postSplitLayers>=1&&postSplitLayers<=SYNC_LAYERS)baseSpd*=SYNC_SPEED_MULT;
+  // After one side loss, next 2 layers: additional 0.90× speed
+  if(phase==='single-after-loss'){
+   var layersSinceLoss=Math.max(stackL.length,stackR.length)-Math.max(stackL.length,stackR.length)+postSplitLayers;
+   var lossLayer=(leftAlive?stackR:stackL).length;
+   if(maxN-lossLayer<=POST_LOSS_DURATION)baseSpd*=POST_LOSS_SPEED_MULT;
+  }
+  var yL=leftAlive?stackL[stackL.length-1].y-BH:0,yR=rightAlive?stackR[stackR.length-1].y-BH:0;
+  if(leftAlive){var topL=stackL[stackL.length-1];curL={x:topL.x,w:topL.w,y:yL,i:topL.i+1,dir:1,t:0,spd:baseSpd,ease:maxN>20&&Math.random()<.3,h:(topL.h+5)%360};}
+  if(rightAlive){var topR=stackR[stackR.length-1];curR={x:topR.x,w:topR.w,y:yR,i:topR.i+1,dir:1,t:0,spd:baseSpd,ease:maxN>20&&Math.random()<.3,h:(topR.h+5)%360};}
   posCurDual();}}
 function posCur(){var p=cur.t%2;p=p>1?2-p:p;if(cur.ease)p=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;if(cur.dir<0)p=1-p;cur.x=-cur.w*0.5+p*(W);}
 function posCurDual(){
- var p=(curL?curL.t%2:(curR?curR.t%2:0));p=p>1?2-p:p;
- if((curL&&curL.ease)||(curR&&curR.ease))p=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
- var px=prism.x+prism.w/2,pLeft=px-W*.18,pRight=px+W*.18;
- if(curL){var t1=p;curL.x=pLeft+t1*(px-pLeft-curL.w/2);}
- if(curR){var t2=1-p;curR.x=pRight-curR.w/2+t2*(px-pRight);}}
+ // Base phase from left side time (sync layers use same p, later layers add phase offset)
+ var tBase=(curL?curL.t:(curR?curR.t:0));
+ var pBase=tBase%2;pBase=pBase>1?2-pBase:pBase;
+ if((curL&&curL.ease)||(curR&&curR.ease))pBase=pBase<.5?2*pBase*pBase:1-Math.pow(-2*pBase+2,2)/2;
+ 
+ // Apply phase offset for right side
+ var phaseFraction=phaseOffset/360;
+ var pLeft=pBase;
+ var tRight=tBase+phaseFraction*2;
+ var pRight=tRight%2;pRight=pRight>1?2-pRight:pRight;
+ if((curR&&curR.ease)||(curL&&curL.ease))pRight=pRight<.5?2*pRight*pRight:1-Math.pow(-2*pRight+2,2)/2;
+ 
+ // Sweep positioning: each bar swings only above its own tower, no center overlap
+ // Both beams must reach their tower's Perfect point
+ var px=prism.x+prism.w/2;
+ if(curL){
+  var xL=stackL[stackL.length-1].x;
+  var topL=stackL[stackL.length-1];
+  // Left: sweeps from outer left edge toward (but not into) center gap
+  // Inner limit: prism left edge minus some spacing to avoid overlap
+  var outerL=Math.max(0,xL-W*0.22);
+  var innerL=prism.x-curL.w-8;
+  // Ensure xL is reachable
+  if(xL<outerL)outerL=xL-PERFECT_THRESHOLD_SYNC;
+  if(xL+PERFECT_THRESHOLD_SYNC>innerL)innerL=xL+curL.w+PERFECT_THRESHOLD_SYNC;
+  curL.x=outerL+pLeft*(innerL-outerL);
+ }
+ if(curR){
+  var xR=stackR[stackR.length-1].x;
+  var topR=stackR[stackR.length-1];
+  // Right: sweeps from (but not into) center gap outward toward right edge
+  // Inner limit: prism right edge plus some spacing to avoid overlap
+  var innerR=prism.x+prism.w+8;
+  var outerR=Math.min(W-curR.w,xR+W*0.22);
+  // Ensure xR is reachable
+  if(xR<innerR)innerR=xR-PERFECT_THRESHOLD_SYNC;
+  if(xR+curR.w+PERFECT_THRESHOLD_SYNC>outerR)outerR=xR+curR.w+PERFECT_THRESHOLD_SYNC;
+  curR.x=innerR+pRight*(outerR-innerR);
+ }
+}
 function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=INITW*0.5;var x0=(W-INITW)/2-DEP*0.3;
  stack=[];for(var k=7;k>=0;k--)stack.push({x:x0,w:INITW,y:H*0.62+k*BH,i:0,h:200});
- stackL=[];stackR=[];falls=[];rings=[];score=0;combo=0;maxCombo=0;layers=0;cam=camT=0;failT=-1;zoom=zoomT=1;zoomY=0;phase='single';prism=null;spectrum=[0,0,0,0,0,0];burstCount=0;leftAlive=true;rightAlive=true;tutShown={};
+ stackL=[];stackR=[];falls=[];rings=[];score=0;combo=0;maxCombo=0;layers=0;cam=camT=0;failT=-1;zoom=zoomT=1;zoomY=0;phase='single';
+ // Prism present from layer 1 (idle/translucent), activates on layer 3 split
+ var baseY=H*0.62+7*BH;prism={x:W/2-W*0.07,w:W*0.14,y:baseY,h:BH,idle:true,activating:false,activateT:0};
+ spectrum=[0,0,0,0,0,0];burstCount=0;leftAlive=true;rightAlive=true;tutShown={};
+ normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postSplitLayers=0;
  spawn();$('score').textContent=0;updateSpectrum();}
 function updateSpectrum(){var slots=document.querySelectorAll('.spec');for(var i=0;i<6;i++){slots[i].classList.toggle('lit',spectrum[i]===1);slots[i].style.background=spectrum[i]===1?'hsl('+SPEC_HUES[i]+',80%,60%)':'rgba(255,255,255,.1)';}}
-function addSpectrum(h){var next=-1;for(var i=0;i<6;i++)if(spectrum[i]===0){next=i;break;}
- if(next>=0){spectrum[next]=1;updateSpectrum();
-  if(spectrum.every(function(v){return v===1}))setTimeout(function(){triggerBurst()},100);}}
-function triggerBurst(){burstCount++;score+=30;flash=2;showCombo('光谱爆发');SFX.burst();
- if(phase==='single'&&stack.length>8){var top=stack[stack.length-1],nw=Math.min(INITW,top.w+(INITW-top.w)*0.7);top.x-=(nw-top.w)/2;top.w=nw;}
- else if(phase==='dual'){if(leftAlive){var tL=stackL[stackL.length-1],initL=Math.min(prism.x-prism.w/2-20,W*0.28),nwL=Math.min(initL,tL.w+(initL-tL.w)*0.7);tL.x-=(nwL-tL.w)/2;tL.w=nwL;}
-  if(rightAlive){var tR=stackR[stackR.length-1],initR=Math.min(prism.x+prism.w/2+20+W*0.28,W*0.28),nwR=Math.min(initR,tR.w+(initR-tR.w)*0.7);tR.x-=(nwR-tR.w)/2;tR.w=nwR;}}
- else if(phase==='single-after-loss'){var stk=leftAlive?stackL:stackR,top2=stk[stk.length-1],initS=Math.min(prism.x-prism.w/2-20,W*0.28),nwS=Math.min(initS,top2.w+(initS-top2.w)*0.7);top2.x-=(nwS-top2.w)/2;top2.w=nwS;}
- rings.push({burst:true,t:0});spectrum=[0,0,0,0,0,0];updateSpectrum();}
+function addSpectrum(h){
+ var next=-1;
+ for(var i=0;i<6;i++)if(spectrum[i]===0){next=i;break;}
+ if(next>=0){
+  spectrum[next]=1;updateSpectrum();
+  // Light up sound
+  var freq=440*Math.pow(2,next/12);
+  osc('sine',freq,0,.08,.15);
+  if(spectrum.every(function(v){return v===1})){
+   // Wait 350ms for burst recovery animation, then spawn next bar
+   setTimeout(function(){triggerBurst();setTimeout(function(){if(phase==='dual'||phase==='single-after-loss')spawn();},350);},100);
+  }
+ }
+}
+function triggerBurst(){
+ burstCount++;score+=30;flash=2;showCombo('光谱爆发');
+ // Major scale arpeggio: C5/D5/E5/G5/A5/C6
+ var burstNotes=[523.25,587.33,659.25,783.99,880.00,1046.50];
+ for(var bi=0;bi<6;bi++){
+  osc('sine',burstNotes[bi],0,.15,.28,0,0,bi*.05);
+ }
+ osc('triangle',1046.50,0,.4,.25,0,0,.3);
+ // Burst recovery with 0.35s animation - store target widths
+ var recoverTargets={};
+ if(phase==='single'&&stack.length>8){
+  var top=stack[stack.length-1];
+  var nw=top.w+(INITW-top.w)*BURST_RECOVER_PCT;
+  nw=Math.max(top.w,Math.min(INITW,nw));
+  recoverTargets.singleTop={from:top.w,to:nw,ref:top};
+ }else if(phase==='dual'||phase==='single-after-loss'){
+  if(leftAlive&&rightAlive){
+   var tL=stackL[stackL.length-1];
+   var nwL=tL.w+(splitInitWidthL-tL.w)*BURST_RECOVER_PCT;
+   nwL=Math.max(tL.w,Math.min(splitInitWidthL,nwL));
+   recoverTargets.left={from:tL.w,to:nwL,ref:tL};
+   var tR=stackR[stackR.length-1];
+   var nwR=tR.w+(splitInitWidthR-tR.w)*BURST_RECOVER_PCT;
+   nwR=Math.max(tR.w,Math.min(splitInitWidthR,nwR));
+   recoverTargets.right={from:tR.w,to:nwR,ref:tR};
+  }else if(!leftAlive||!rightAlive){
+   // Revive at 50% of split-initial width
+   if(!leftAlive){
+    var reviveW=splitInitWidthL*BURST_REVIVE_PCT;
+    var xL=prism.x-reviveW-10;
+    var baseL=stackL[0];
+    stackL.push({x:xL,w:reviveW,y:baseL.y-BH*(stackL.length-7),i:baseL.i+stackL.length,h:200});
+    leftAlive=true;
+   }
+   if(!rightAlive){
+    var reviveWR=splitInitWidthR*BURST_REVIVE_PCT;
+    var xR=prism.x+prism.w+10;
+    var baseR=stackR[0];
+    stackR.push({x:xR,w:reviveWR,y:baseR.y-BH*(stackR.length-7),i:baseR.i+stackR.length,h:(200+180)%360});
+    rightAlive=true;
+   }
+   if(leftAlive){
+    var tL2=stackL[stackL.length-1];
+    var nwL2=tL2.w+(splitInitWidthL-tL2.w)*BURST_RECOVER_PCT;
+    nwL2=Math.max(tL2.w,Math.min(splitInitWidthL,nwL2));
+    recoverTargets.left={from:tL2.w,to:nwL2,ref:tL2};
+   }
+   if(rightAlive){
+    var tR2=stackR[stackR.length-1];
+    var nwR2=tR2.w+(splitInitWidthR-tR2.w)*BURST_RECOVER_PCT;
+    nwR2=Math.max(tR2.w,Math.min(splitInitWidthR,nwR2));
+    recoverTargets.right={from:tR2.w,to:nwR2,ref:tR2};
+   }
+   phase='dual';
+  }
+ }
+ // Animate recovery over 0.35s before spawning next bar
+ var startT=Date.now();
+ var recoverInterval=setInterval(function(){
+  var elapsed=(Date.now()-startT)/1000;
+  var progress=Math.min(1,elapsed/0.35);
+  if(recoverTargets.singleTop){
+   var t=recoverTargets.singleTop;
+   var newW=t.from+(t.to-t.from)*progress;
+   t.ref.x-=(newW-t.ref.w)/2;t.ref.w=newW;
+  }
+  if(recoverTargets.left){
+   var tL=recoverTargets.left;
+   var newWL=tL.from+(tL.to-tL.from)*progress;
+   tL.ref.x-=(newWL-tL.ref.w)/2;tL.ref.w=newWL;
+  }
+  if(recoverTargets.right){
+   var tR=recoverTargets.right;
+   var newWR=tR.from+(tR.to-tR.from)*progress;
+   tR.ref.x-=(newWR-tR.ref.w)/2;tR.ref.w=newWR;
+  }
+  if(progress>=1)clearInterval(recoverInterval);
+ },16);
+ rings.push({burst:true,t:0});spectrum=[0,0,0,0,0,0];updateSpectrum();
+}
 function showCombo(t){var c=$('combo');c.textContent=t;c.classList.remove('play');void c.offsetWidth;c.classList.add('play');}
 function showTut(k,t){if(tutShown[k])return;tutShown[k]=true;var el=$('tut');el.innerHTML='<i></i>'+t;el.classList.remove('hide');el.style.opacity=1;var yPos=phase==='single'?cur.y+BH+DEP*0.35+30:(curL||curR).y+BH+DEP*0.35+30;el.style.left=(W/2)+'px';el.style.top=yPos+'px';}
-function splitTower(){phase='dual';var top=stack[stack.length-1],baseW=Math.min(top.w*0.48,W*0.28),gapW=W*0.14;
- prism={x:W/2-gapW/2,w:gapW,y:top.y,h:BH};
+function splitTower(){
+ phase='dual';postSplitLayers=0;phaseOffset=0;
+ var top=stack[stack.length-1];
+ // Split width: min(preTopW × 0.48, screenW × 0.28)
+ var baseW=Math.min(top.w*SPLIT_WIDTH_RATIO,W*SPLIT_WIDTH_SCREEN_CAP);
+ splitInitWidthL=baseW;splitInitWidthR=baseW;
+ var gapW=Math.max(W*0.14,prism.w);
+ // Activate prism: 0.6s animation (0.15s brighten → 0.35s split → 0.10s settle)
+ prism.idle=false;prism.activating=true;prism.activateT=0;
+ prism.x=W/2-gapW/2;prism.w=gapW;prism.y=top.y;prism.h=BH;
  stackL=stack.slice(0,8);stackR=stack.slice(0,8);
- for(var i=8;i<stack.length;i++){var s=stack[i],xL=prism.x-baseW-10,xR=prism.x+prism.w+10;
-  stackL.push({x:xL,w:baseW,y:s.y,i:s.i,h:(s.h||200)});stackR.push({x:xR,w:baseW,y:s.y,i:s.i,h:((s.h||200)+180)%360});}
- showTut('split','光会分开，两边都要接住');SFX.split();}
+ for(var i=8;i<stack.length;i++){
+  var s=stack[i],xL=prism.x-baseW-10,xR=prism.x+prism.w+10;
+  // Right tower: complementary color (+180°) for differentiation
+  stackL.push({x:xL,w:baseW,y:s.y,i:s.i,h:(s.h||200)});
+  stackR.push({x:xR,w:baseW,y:s.y,i:s.i,h:((s.h||200)+180)%360});
+ }
+ cur=null;leftAlive=true;rightAlive=true;
+ // After 0.6s activation, show text and spawn bars immediately
+ setTimeout(function(){
+  if(phase==='dual'){
+   prism.activating=false;
+   showTut('split','光一分为二');
+   SFX.split();
+   // Spawn bars immediately so they're visible and swinging
+   spawn();
+  }
+ },600);
+}
 function drop(){
- if(phase==='single'){var top=stack[stack.length-1],c=cur,d=c.x-top.x,perf=Math.abs(d)<=4;
-  if(perf){combo++;if(combo>maxCombo)maxCombo=combo;c.x=top.x;if(combo>=2){var nw=Math.min(INITW,c.w*1.04);c.x-=(nw-c.w)/2;c.w=nw;}score+=3;flash=1;
-   showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');SFX.perfect(combo);rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i,h:c.h},t:0,side:'single'});if(combo>=3)rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i,h:c.h},t:-0.08,side:'single'});addSpectrum(c.h);}
-  else{if(combo>0)SFX.brk();combo=0;var l=Math.max(c.x,top.x),r=Math.min(c.x+c.w,top.x+top.w),nw=r-l;
+ if(phase==='single'){
+  var top=stack[stack.length-1],c=cur,d=c.x-top.x,perf=Math.abs(d)<=PERFECT_THRESHOLD_NORMAL;
+  if(perf){
+   combo++;if(combo>maxCombo)maxCombo=combo;normalSuccessStreak=0;
+   c.x=top.x;
+   if(combo>=2){var nw=Math.min(INITW,c.w*1.04);c.x-=(nw-c.w)/2;c.w=nw;}
+   score+=3;flash=1;
+   showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');
+   SFX.perfect(combo);
+   rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i,h:c.h},t:0,side:'single'});
+   if(combo>=3)rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i,h:c.h},t:-0.08,side:'single'});
+   addSpectrum(c.h);
+   if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}
+  }else{
+   if(combo>0)SFX.brk();combo=0;
+   var l=Math.max(c.x,top.x),r=Math.min(c.x+c.w,top.x+top.w),nw=r-l;
    if(nw<=0){falls.push(mkFall(c.x,c.w,c));cur=null;return gameOver();}
-   if(c.x<l)falls.push(mkFall(c.x,l-c.x,c,-1));else falls.push(mkFall(r,c.x+c.w-r,c,1));c.x=l;c.w=nw;score+=1;SFX.place();
-   var prevH=top.h||200;if(hueDiff(c.h,prevH)<=25)addSpectrum(c.h);}
+   if(c.x<l)falls.push(mkFall(c.x,l-c.x,c,-1));else falls.push(mkFall(r,c.x+c.w-r,c,1));
+   c.x=l;c.w=nw;score+=1;SFX.place();
+   normalSuccessStreak++;
+   if(normalSuccessStreak>=3){addSpectrum(c.h);normalSuccessStreak=0;}
+  }
   layers++;stack.push({x:c.x,w:c.w,y:c.y,i:c.i,h:c.h});$('score').textContent=score;
   if(onb){onb=false;lss('stack_onboarded','1');$('tut').style.opacity=0;setTimeout(function(){$('tut').classList.add('hide')},400);}
   var sy=c.y+camT;if(sy<H*0.45)camT+=H*0.45-sy;
-  if(layers===3)splitTower();spawn();}
- else dropDual();}
+  if(layers===3){splitTower();}else{spawn();}
+ }else dropDual();}
 function dropDual(){
+ postSplitLayers++;
+ // Threshold: 8px for layers 4-6 (postSplitLayers 1-3), 4px for layer 7+
+ var threshold=(postSplitLayers<=SYNC_LAYERS)?PERFECT_THRESHOLD_SYNC:PERFECT_THRESHOLD_NORMAL;
  var perfL=false,perfR=false,missL=false,missR=false,scoreL=0,scoreR=0;
- if(leftAlive&&curL){var topL=stackL[stackL.length-1],dL=curL.x-topL.x;
-  if(Math.abs(dL)<=4){perfL=true;curL.x=topL.x;var growL=stackL.filter(function(s){return s.y<curL.y}).length>=2;
-   if(growL){var nwL=Math.min(prism.x-prism.w/2-20,curL.w*1.04);curL.x-=(nwL-curL.w)/2;curL.w=nwL;}scoreL=3;flash=Math.max(flash,0.7);rings.push({b:{x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h},t:0,side:'L'});addSpectrum(curL.h);}
-  else{var lL=Math.max(curL.x,topL.x),rL=Math.min(curL.x+curL.w,topL.x+topL.w),nwL2=rL-lL;
-   if(nwL2<=0){missL=true;falls.push(mkFall(curL.x,curL.w,curL));leftAlive=false;}
-   else{if(curL.x<lL)falls.push(mkFall(curL.x,lL-curL.x,curL,-1));else falls.push(mkFall(rL,curL.x+curL.w-rL,curL,1));curL.x=lL;curL.w=nwL2;scoreL=1;
-    var prevHL=topL.h||200;if(hueDiff(curL.h,prevHL)<=25)addSpectrum(curL.h);}}}
- if(rightAlive&&curR){var topR=stackR[stackR.length-1],dR=curR.x-topR.x;
-  if(Math.abs(dR)<=4){perfR=true;curR.x=topR.x;var growR=stackR.filter(function(s){return s.y<curR.y}).length>=2;
-   if(growR){var nwR=Math.min(prism.x+prism.w/2+prism.w-20,curR.w*1.04);curR.x-=(nwR-curR.w)/2;curR.w=nwR;}scoreR=3;flash=Math.max(flash,0.7);rings.push({b:{x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h},t:0,side:'R'});addSpectrum(curR.h);}
-  else{var lR=Math.max(curR.x,topR.x),rR=Math.min(curR.x+curR.w,topR.x+topR.w),nwR2=rR-lR;
-   if(nwR2<=0){missR=true;falls.push(mkFall(curR.x,curR.w,curR));rightAlive=false;}
-   else{if(curR.x<lR)falls.push(mkFall(curR.x,lR-curR.x,curR,-1));else falls.push(mkFall(rR,curR.x+curR.w-rR,curR,1));curR.x=lR;curR.w=nwR2;scoreR=1;
-    var prevHR=topR.h||200;if(hueDiff(curR.h,prevHR)<=25)addSpectrum(curR.h);}}}
+ if(leftAlive&&curL){
+  var topL=stackL[stackL.length-1],dL=curL.x-topL.x;
+  if(Math.abs(dL)<=threshold){
+   perfL=true;curL.x=topL.x;normalSuccessStreak=0;
+   var growL=stackL.filter(function(s){return s.y<curL.y}).length>=2;
+   if(growL){var nwL=Math.min(splitInitWidthL,curL.w*1.04);curL.x-=(nwL-curL.w)/2;curL.w=nwL;}
+   scoreL=3;flash=Math.max(flash,0.7);
+   rings.push({b:{x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h},t:0,side:'L'});
+  }else{
+   var lL=Math.max(curL.x,topL.x),rL=Math.min(curL.x+curL.w,topL.x+topL.w),nwL2=rL-lL;
+   if(nwL2<=0){missL=true;falls.push(mkFall(curL.x,curL.w,curL));leftAlive=false;normalSuccessStreak=0;}
+   else{
+    if(curL.x<lL)falls.push(mkFall(curL.x,lL-curL.x,curL,-1));
+    else falls.push(mkFall(rL,curL.x+curL.w-rL,curL,1));
+    curL.x=lL;curL.w=nwL2;scoreL=1;
+   }
+  }
+ }
+ if(rightAlive&&curR){
+  var topR=stackR[stackR.length-1],dR=curR.x-topR.x;
+  if(Math.abs(dR)<=threshold){
+   perfR=true;curR.x=topR.x;normalSuccessStreak=0;
+   var growR=stackR.filter(function(s){return s.y<curR.y}).length>=2;
+   if(growR){var nwR=Math.min(splitInitWidthR,curR.w*1.04);curR.x-=(nwR-curR.w)/2;curR.w=nwR;}
+   scoreR=3;flash=Math.max(flash,0.7);
+   rings.push({b:{x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h},t:0,side:'R'});
+  }else{
+   var lR=Math.max(curR.x,topR.x),rR=Math.min(curR.x+curR.w,topR.x+topR.w),nwR2=rR-lR;
+   if(nwR2<=0){missR=true;falls.push(mkFall(curR.x,curR.w,curR));rightAlive=false;normalSuccessStreak=0;}
+   else{
+    if(curR.x<lR)falls.push(mkFall(curR.x,lR-curR.x,curR,-1));
+    else falls.push(mkFall(rR,curR.x+curR.w-rR,curR,1));
+    curR.x=lR;curR.w=nwR2;scoreR=1;
+   }
+  }
+ }
  if(missL&&missR)return gameOverDual();
- if(missL||missR){SFX.towerOut();showTut('oneSide','一侧熄灭了，守住另一侧');phase='single-after-loss';}
- if(perfL&&perfR){combo++;if(combo>maxCombo)maxCombo=combo;score+=10;flash=1.5;showCombo('双折完美');SFX.dualPerfect();}
- else if(perfL||perfR){combo++;if(combo>maxCombo)maxCombo=combo;score+=scoreL+scoreR;if(perfL||perfR)showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');SFX.perfect(combo);}
- else{if(combo>0)SFX.brk();combo=0;score+=scoreL+scoreR;SFX.place();}
+ if(missL||missR){SFX.towerOut();showTut('oneSide','一侧熄灭了，守住另一侧');phase='single-after-loss';normalSuccessStreak=0;}
+ // Scoring and spectrum
+ if(perfL&&perfR){
+  combo++;if(combo>maxCombo)maxCombo=combo;
+  score+=10;flash=1.5;
+  showCombo('双折完美');SFX.dualPerfect();
+  addSpectrum(curL.h);addSpectrum(curR.h);
+  if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}
+ }else if(perfL||perfR){
+  combo++;if(combo>maxCombo)maxCombo=combo;
+  score+=scoreL+scoreR;
+  showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');SFX.perfect(combo);
+  if(perfL){addSpectrum(curL.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
+  if(perfR){addSpectrum(curR.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
+ }else{
+  if(combo>0)SFX.brk();combo=0;
+  score+=scoreL+scoreR;SFX.place();
+  // Normal success counter: per tap (at least one side landed, no Perfect)
+  // This tap counts as 1 toward 3, not per-side
+  if(!missL&&!missR&&(leftAlive||rightAlive)){
+   normalSuccessStreak+=1;
+   if(normalSuccessStreak>=3){addSpectrum((curL||curR).h);normalSuccessStreak=0;}
+  }
+ }
  if(leftAlive&&curL){layers++;stackL.push({x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h});}
  if(rightAlive&&curR){layers++;stackR.push({x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h});}
  $('score').textContent=score;
+ // Update phase offset: phaseDeg = min(90, 15 * (1 + floor((n-7)/3)))
+ // Layers 7-9: 15°, 10-12: 30°, 13-15: 45°, etc.
+ var totalLayers=layers;
+ if(totalLayers>=7){phaseOffset=Math.min(MAX_PHASE_OFFSET_DEG,15*(1+Math.floor((totalLayers-7)/3)));}
  var alive=leftAlive?stackL:stackR,sy2=(alive[alive.length-1].y)+camT;if(sy2<H*0.45)camT+=H*0.45-sy2;spawn();}
 function mkFall(x,w,c,s){s=s||(Math.random()<.5?-1:1);return{x:x,w:w,y:c.y,vy:0,vx:60*s,r:0,vr:s*Math.PI/2,i:c.i,h:c.h||200,t:0};}
 function gameOver(){state='over';failT=0;prevBest=best;SFX.fail();if(navigator.vibrate)navigator.vibrate(40);
@@ -198,17 +439,39 @@ function cube(x,y,w,i,a){var dx=DEP*0.6,dy=DEP*0.35;ctx.globalAlpha=a==null?1:a;
  ctx.fillStyle=col(i,-10);ctx.fillRect(x,y,w,BH);
  ctx.fillStyle=col(i,-20);ctx.beginPath();ctx.moveTo(x+w,y);ctx.lineTo(x+w+dx,y-dy);ctx.lineTo(x+w+dx,y-dy+BH);ctx.lineTo(x+w,y+BH);ctx.fill();
  ctx.fillStyle=col(i,0);ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y-dy);ctx.lineTo(x+w+dx,y-dy);ctx.lineTo(x+w,y);ctx.fill();ctx.globalAlpha=1;}
-function drawPrism(){if(!prism)return;var px=prism.x+prism.w/2,py=prism.y+prism.h/2,hw=prism.w*0.4,hh=prism.h*0.7;
- ctx.save();ctx.globalAlpha=0.25;
- var grd=ctx.createLinearGradient(px-hw,py,px+hw,py);grd.addColorStop(0,'rgba(255,100,255,0.6)');grd.addColorStop(.5,'rgba(255,255,255,0.9)');grd.addColorStop(1,'rgba(100,200,255,0.6)');
- ctx.fillStyle=grd;ctx.beginPath();ctx.moveTo(px,py-hh);ctx.lineTo(px+hw,py);ctx.lineTo(px,py+hh);ctx.lineTo(px-hw,py);ctx.closePath();ctx.fill();
- ctx.strokeStyle='rgba(255,255,255,0.5)';ctx.lineWidth=2;ctx.stroke();ctx.globalAlpha=1;ctx.restore();}
+function drawPrism(){
+ if(!prism)return;
+ var px=prism.x+prism.w/2,py=prism.y+prism.h/2,hw=prism.w*0.4,hh=prism.h*0.7;
+ ctx.save();
+ // Idle: translucent 0.75 opacity. Activating: pulse brighter. Active: full 0.85 opacity
+ var baseAlpha=prism.idle?0.75:(prism.activating?0.75+(0.25*Math.sin(prism.activateT*10)):0.85);
+ ctx.globalAlpha=baseAlpha;
+ var grd=ctx.createLinearGradient(px-hw,py,px+hw,py);
+ grd.addColorStop(0,'rgba(255,100,255,0.8)');
+ grd.addColorStop(.5,'rgba(255,255,255,0.95)');
+ grd.addColorStop(1,'rgba(100,200,255,0.8)');
+ ctx.fillStyle=grd;
+ ctx.beginPath();ctx.moveTo(px,py-hh);ctx.lineTo(px+hw,py);ctx.lineTo(px,py+hh);ctx.lineTo(px-hw,py);ctx.closePath();ctx.fill();
+ ctx.strokeStyle=prism.idle?'rgba(255,255,255,0.3)':(prism.activating?'rgba(255,255,255,0.8)':'rgba(255,255,255,0.6)');
+ ctx.lineWidth=prism.activating?3:2;
+ if(prism.activating){ctx.shadowColor='rgba(255,255,255,0.8)';ctx.shadowBlur=15;}
+ ctx.stroke();
+ ctx.globalAlpha=1;ctx.restore();
+}
 function drawBeam(x0,y0,x1,y1,h,a){ctx.save();ctx.globalAlpha=a||0.3;
  var grd=ctx.createLinearGradient(x0,y0,x1,y1);grd.addColorStop(0,colH(h,20));grd.addColorStop(1,colH(h,-10));ctx.strokeStyle=grd;ctx.lineWidth=3;ctx.shadowColor=colH(h,30);ctx.shadowBlur=8;
  ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.restore();}
 function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
- if(state==='play'){if(phase==='single'&&cur){cur.t+=dt*cur.spd;posCur();}
-  else if(phase!=='single'){if(curL){curL.t+=dt*curL.spd;}if(curR){curR.t+=dt*curR.spd;}posCurDual();}}
+ if(state==='play'){
+  if(phase==='single'&&cur){cur.t+=dt*cur.spd;posCur();}
+  else if(phase!=='single'){
+   if(curL){curL.t+=dt*curL.spd;}
+   if(curR){curR.t+=dt*curR.spd;}
+   posCurDual();
+  }
+  // Update prism activation timer
+  if(prism&&prism.activating){prism.activateT+=dt;}
+ }
  cam+=(camT-cam)*0.1;zoom+=(zoomT-zoom)*Math.min(1,dt*5);
  ctx.setTransform(dpr,0,0,dpr,0,0);var T=THEMES[theme],g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,T.a);g.addColorStop(1,T.b);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
  ctx.save();
