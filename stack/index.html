@@ -140,29 +140,30 @@ function posCurDual(){
  var pRight=tRight%2;pRight=pRight>1?2-pRight:pRight;
  if(curR&&curR.ease)pRight=pRight<.5?2*pRight*pRight:1-Math.pow(-2*pRight+2,2)/2;
  
- // Symmetric sweep: p=0 at outer, p=1 at inner (both move inward together)
- // A = outer travel beyond Perfect, B = inner travel toward center
- // Both use same A and B so Perfect occurs at same p
+ // Symmetric sweep: iOS construction for consistent feel
+ // A = B = max(20, threshold), both sides move inward, Perfect at p=0.5
  var playing=layers+1;
  var thresh=(playing>=4&&playing<=6)?PERFECT_THRESHOLD_SYNC:PERFECT_THRESHOLD_NORMAL;
- var A=Math.max(thresh,W*0.15);
  var smallGap=16;
  if(curL&&curR){
   var xL=stackL[stackL.length-1].x,xR=stackR[stackR.length-1].x;
-  var maxB=(xR-xL-curL.w-curR.w-smallGap)/2;
-  var B=Math.max(thresh,Math.min(A,maxB));
+  var ideal=Math.max(20,thresh);
+  // Clamp so 2B <= xR - xL - curL.w - smallGap (no overlap)
+  var maxB=(xR-xL-curL.w-smallGap)/2;
+  var B=Math.min(ideal,maxB);
+  var A=B;
   // Left: curL.x = (xL - A) + p*(A + B), moves from outer toward inner
   curL.x=(xL-A)+pLeft*(A+B);
-  // Right: curR.x = (xR + A) - p*(A + B), moves from outer toward inner (same direction)
+  // Right: curR.x = (xR + A) - p*(A + B), moves from outer toward inner
   curR.x=(xR+A)-pRight*(A+B);
  }else if(curL){
   var xL2=stackL[stackL.length-1].x;
-  var B2=Math.max(thresh,A);
-  curL.x=(xL2-A)+pLeft*(A+B2);
+  var AB=Math.max(20,thresh);
+  curL.x=(xL2-AB)+pLeft*(AB+AB);
  }else if(curR){
   var xR2=stackR[stackR.length-1].x;
-  var B2=Math.max(thresh,A);
-  curR.x=(xR2+A)-pRight*(A+B2);
+  var AB=Math.max(20,thresh);
+  curR.x=(xR2+AB)-pRight*(AB+AB);
  }
 }
 function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=INITW*0.5;var x0=(W-INITW)/2-DEP*0.3;
@@ -172,9 +173,10 @@ function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=
  var baseY=H*0.62+7*BH;prism={x:W/2-W*0.07,w:W*0.14,y:baseY,h:BH,idle:true,activating:false,activateT:0};
  spectrum=[0,0,0,0,0,0];burstCount=0;leftAlive=true;rightAlive=true;tutShown={};
  normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postLossRemaining=0;deadBeamFadeL=0;deadBeamFadeR=0;
+ cur=null;curL=null;curR=null;
  spawn();$('score').textContent=0;updateSpectrum();}
 function updateSpectrum(){var slots=document.querySelectorAll('.spec');for(var i=0;i<6;i++){slots[i].classList.toggle('lit',spectrum[i]===1);slots[i].style.background=spectrum[i]===1?'hsl('+SPEC_HUES[i]+',80%,60%)':'rgba(255,255,255,.1)';}}
-function addSpectrum(h){
+function addSpectrum(h,wasLeft,wasRight){
  var next=-1;
  for(var i=0;i<6;i++)if(spectrum[i]===0){next=i;break;}
  if(next>=0){
@@ -182,16 +184,18 @@ function addSpectrum(h){
   // Light up sound
   var freq=440*Math.pow(2,next/12);
   osc('sine',freq,0,.08,.15);
+  if(navigator.vibrate)navigator.vibrate(10);
   if(spectrum.every(function(v){return v===1})){
    // Trigger burst after 100ms, then spawn after 0.35s recover
-   setTimeout(function(){triggerBurst();},100);
+   setTimeout(function(){triggerBurst(wasLeft,wasRight);},100);
    return true;
   }
  }
  return false;
 }
-function triggerBurst(){
+function triggerBurst(wasLeftAlive,wasRightAlive){
  burstCount++;score+=30;flash=2;showCombo('光谱爆发');
+ if(navigator.vibrate)navigator.vibrate([50,30,50,30,50,30,50,30,50,30,50]);
  // Major scale arpeggio: C5/D5/E5/G5/A5/C6
  var burstNotes=[523.25,587.33,659.25,783.99,880.00,1046.50];
  for(var bi=0;bi<6;bi++){
@@ -219,16 +223,16 @@ function triggerBurst(){
    nwR=Math.max(tR.w,Math.min(splitInitWidthR,nwR));
    recoverTargets.right={from:tR.w,to:nwR,ref:tR};
   }else{
-   // One side dead: revive at 60% of initW, living side gets 70% recovery
-   // Note: revive width is 60% (0.6), not 50%
-   if(!leftAlive){
+   // One side dead: revive ONLY if was already dead BEFORE this tap
+   // Note: revive width is 60% (0.6)
+   if(!leftAlive&&!wasLeftAlive){
     var reviveW=splitInitWidthL*BURST_REVIVE_PCT;
     var xL=prism.x-reviveW-10;
     var baseL=stackL[0];
     stackL.push({x:xL,w:reviveW,y:baseL.y-BH*(stackL.length-7),i:baseL.i+stackL.length,h:200});
     leftAlive=true;
    }
-   if(!rightAlive){
+   if(!rightAlive&&!wasRightAlive){
     var reviveWR=splitInitWidthR*BURST_REVIVE_PCT;
     var xR=prism.x+prism.w+10;
     var baseR=stackR[0];
@@ -298,13 +302,14 @@ function splitTower(){
   stackL.push({x:xL,w:baseW,y:s.y,i:s.i,h:(s.h||200)});
   stackR.push({x:xR,w:baseW,y:s.y,i:s.i,h:((s.h||200)+180)%360});
  }
- cur=null;leftAlive=true;rightAlive=true;
+ cur=null;curL=null;curR=null;leftAlive=true;rightAlive=true;
  // After 0.6s activation, show text and spawn bars immediately
  setTimeout(function(){
   if(phase==='dual'){
    prism.activating=false;
    showTut('split','光一分为二');
    SFX.split();
+   if(navigator.vibrate)navigator.vibrate([60,30,100]);
    // Spawn bars immediately so they're visible and swinging
    spawn();
   }
@@ -322,7 +327,7 @@ function drop(){
    SFX.perfect(combo);
    rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i,h:c.h},t:0,side:'single'});
    if(combo>=3)rings.push({b:{x:c.x,w:c.w,y:c.y,i:c.i,h:c.h},t:-0.08,side:'single'});
-   addSpectrum(c.h);
+   addSpectrum(c.h,true,true);
    if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}
   }else{
    if(combo>0)SFX.brk();combo=0;
@@ -331,7 +336,7 @@ function drop(){
    if(c.x<l)falls.push(mkFall(c.x,l-c.x,c,-1));else falls.push(mkFall(r,c.x+c.w-r,c,1));
    c.x=l;c.w=nw;score+=1;SFX.place();
    normalSuccessStreak++;
-   if(normalSuccessStreak>=3){addSpectrum(c.h);normalSuccessStreak=0;}
+   if(normalSuccessStreak>=3){addSpectrum(c.h,true,true);normalSuccessStreak=0;}
   }
   layers++;stack.push({x:c.x,w:c.w,y:c.y,i:c.i,h:c.h});
   // Update prism position to track tower top
@@ -344,16 +349,16 @@ function drop(){
 function dropDual(){
  // Ignore taps when bars don't exist (during split activation)
  if(!curL&&!curR)return;
+ // Snapshot alive state BEFORE judging (for burst revive logic)
+ var wasLeftAlive=leftAlive,wasRightAlive=rightAlive;
  // playing = layers + 1 (layer being judged now)
  var playing=layers+1;
  var threshold=(playing>=4&&playing<=6)?PERFECT_THRESHOLD_SYNC:PERFECT_THRESHOLD_NORMAL;
  var perfL=false,perfR=false,missL=false,missR=false,scoreL=0,scoreR=0;
- var wasLeftAlive=leftAlive,wasRightAlive=rightAlive;
  if(leftAlive&&curL){
   var topL=stackL[stackL.length-1],dL=curL.x-topL.x;
   if(Math.abs(dL)<=threshold){
    perfL=true;curL.x=topL.x;normalSuccessStreak=0;
-   if(combo>=2){var nwL=Math.min(splitInitWidthL,curL.w*1.04);curL.x-=(nwL-curL.w)/2;curL.w=nwL;}
    scoreL=3;flash=Math.max(flash,0.7);
    rings.push({b:{x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h},t:0,side:'L'});
   }else{
@@ -370,7 +375,6 @@ function dropDual(){
   var topR=stackR[stackR.length-1],dR=curR.x-topR.x;
   if(Math.abs(dR)<=threshold){
    perfR=true;curR.x=topR.x;normalSuccessStreak=0;
-   if(combo>=2){var nwR=Math.min(splitInitWidthR,curR.w*1.04);curR.x-=(nwR-curR.w)/2;curR.w=nwR;}
    scoreR=3;flash=Math.max(flash,0.7);
    rings.push({b:{x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h},t:0,side:'R'});
   }else{
@@ -386,35 +390,52 @@ function dropDual(){
  if(missL&&missR)return gameOverDual();
  // Track extinguish and set post-loss speed counter
  if((missL||missR)&&!(missL&&missR)){
-  SFX.towerOut();showTut('oneSide','一侧熄灭了，守住另一侧');
+  SFX.towerOut();
+  if(navigator.vibrate)navigator.vibrate([80,20,40,20,40]);
+  showTut('oneSide','一侧熄灭了<br>守住另一侧');
   phase='single-after-loss';normalSuccessStreak=0;
   postLossRemaining=2;
   // Start beam fade-out (0.2s), then null the dead side's bar
   if(missL){deadBeamFadeL=0.2;setTimeout(function(){curL=null;},200);}
   if(missR){deadBeamFadeR=0.2;setTimeout(function(){curR=null;},200);}
  }
+ // Check if both sides are now dead (last living side just missed)
+ if(!leftAlive&&!rightAlive)return gameOverDual();
  // Scoring and spectrum
  var burstWillTrigger=false;
  if(perfL&&perfR){
   combo++;if(combo>maxCombo)maxCombo=combo;
+  // Combo grow: increment first, then check >= 2
+  if(combo>=2){
+   if(curL){var nwL=Math.min(splitInitWidthL,curL.w*1.04);curL.x-=(nwL-curL.w)/2;curL.w=nwL;}
+   if(curR){var nwR=Math.min(splitInitWidthR,curR.w*1.04);curR.x-=(nwR-curR.w)/2;curR.w=nwR;}
+  }
   score+=10;flash=1.5;
   showCombo('双折完美');SFX.dualPerfect();
-  addSpectrum(curL.h);
-  burstWillTrigger=addSpectrum(curR.h);
+  if(navigator.vibrate)navigator.vibrate([40,20,60]);
+  addSpectrum(curL.h,wasLeftAlive,wasRightAlive);
+  burstWillTrigger=addSpectrum(curR.h,wasLeftAlive,wasRightAlive);
   if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}
  }else if(perfL||perfR){
   combo++;if(combo>maxCombo)maxCombo=combo;
+  // Combo grow: increment first, then check >= 2
+  if(combo>=2){
+   if(perfL&&curL){var nwL2=Math.min(splitInitWidthL,curL.w*1.04);curL.x-=(nwL2-curL.w)/2;curL.w=nwL2;}
+   if(perfR&&curR){var nwR2=Math.min(splitInitWidthR,curR.w*1.04);curR.x-=(nwR2-curR.w)/2;curR.w=nwR2;}
+  }
   score+=scoreL+scoreR;
+  var pCount=Math.min(combo,12);
   showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');SFX.perfect(combo);
-  if(perfL){burstWillTrigger=addSpectrum(curL.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
-  if(perfR){burstWillTrigger=addSpectrum(curR.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
+  if(navigator.vibrate)navigator.vibrate(combo>=3?[30,10,20]:30);
+  if(perfL){burstWillTrigger=addSpectrum(curL.h,wasLeftAlive,wasRightAlive);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
+  if(perfR){burstWillTrigger=addSpectrum(curR.h,wasLeftAlive,wasRightAlive);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
  }else{
   if(combo>0)SFX.brk();combo=0;
   score+=scoreL+scoreR;SFX.place();
   // Normal success counter: per tap, not per side
   if(!missL&&!missR&&(leftAlive||rightAlive)){
    normalSuccessStreak+=1;
-   if(normalSuccessStreak>=3){burstWillTrigger=addSpectrum((curL||curR).h);normalSuccessStreak=0;}
+   if(normalSuccessStreak>=3){burstWillTrigger=addSpectrum((curL||curR).h,wasLeftAlive,wasRightAlive);normalSuccessStreak=0;}
   }
  }
  // Push blocks and increment layers ONCE per tap (not twice)
