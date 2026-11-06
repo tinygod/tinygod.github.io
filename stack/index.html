@@ -85,7 +85,7 @@ var SFX={place:function(){osc('triangle',220,110,.12,.4);noise(.03,.15,800);},
 var ZC=0,maxCombo=0,layers=0,BH,INITW,DEP,stack,stackL,stackR,cur,curL,curR,falls,rings,score,combo,state='start',cam=0,camT=0,flash=0,last=0,failT=-1,zoom=1,zoomT=1,zoomY=0;
 var phase='single',prism=null,spectrum=[0,0,0,0,0,0],burstCount=0,leftAlive=true,rightAlive=true,tutShown={};
 var SPEC_HUES=[0,30,60,120,210,270];
-var normalSuccessStreak=0,splitInitWidthL=0,splitInitWidthR=0,phaseOffset=0,postLossRemaining=0;
+var normalSuccessStreak=0,splitInitWidthL=0,splitInitWidthR=0,phaseOffset=0,postLossRemaining=0,deadBeamFadeL=0,deadBeamFadeR=0;
 // ========== APPROVED REMIX RULES CONSTANTS ==========
 // Perfect thresholds (px): layers 1-3: 4px; layers 4-6: 8px; layer 7+: 4px
 var PERFECT_THRESHOLD_NORMAL=4,PERFECT_THRESHOLD_SYNC=8;
@@ -170,7 +170,7 @@ function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=
  // Prism present from layer 1 (idle/translucent), activates on layer 3 split
  var baseY=H*0.62+7*BH;prism={x:W/2-W*0.07,w:W*0.14,y:baseY,h:BH,idle:true,activating:false,activateT:0};
  spectrum=[0,0,0,0,0,0];burstCount=0;leftAlive=true;rightAlive=true;tutShown={};
- normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postLossRemaining=0;
+ normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postLossRemaining=0;deadBeamFadeL=0;deadBeamFadeR=0;
  spawn();$('score').textContent=0;updateSpectrum();}
 function updateSpectrum(){var slots=document.querySelectorAll('.spec');for(var i=0;i<6;i++){slots[i].classList.toggle('lit',spectrum[i]===1);slots[i].style.background=spectrum[i]===1?'hsl('+SPEC_HUES[i]+',80%,60%)':'rgba(255,255,255,.1)';}}
 function addSpectrum(h){
@@ -388,9 +388,9 @@ function dropDual(){
   SFX.towerOut();showTut('oneSide','一侧熄灭了，守住另一侧');
   phase='single-after-loss';normalSuccessStreak=0;
   postLossRemaining=2;
-  // Null the dead side's bar so it stops rendering
-  if(missL)curL=null;
-  if(missR)curR=null;
+  // Start beam fade-out (0.2s), then null the dead side's bar
+  if(missL){deadBeamFadeL=0.2;setTimeout(function(){curL=null;},200);}
+  if(missR){deadBeamFadeR=0.2;setTimeout(function(){curR=null;},200);}
  }
  // Scoring and spectrum
  var burstWillTrigger=false;
@@ -493,6 +493,9 @@ function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   }
   // Update prism activation timer
   if(prism&&prism.activating){prism.activateT+=dt;}
+  // Tick down dead beam fade timers
+  if(deadBeamFadeL>0)deadBeamFadeL=Math.max(0,deadBeamFadeL-dt);
+  if(deadBeamFadeR>0)deadBeamFadeR=Math.max(0,deadBeamFadeR-dt);
  }
  cam+=(camT-cam)*0.1;zoom+=(zoomT-zoom)*Math.min(1,dt*5);
  ctx.setTransform(dpr,0,0,dpr,0,0);var T=THEMES[theme],g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,T.a);g.addColorStop(1,T.b);ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
@@ -517,8 +520,8 @@ function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   for(var k=0;k<stackR.length;k++){var sR=stackR[k];cubeH(sR.x,sR.y,sR.w,sR.h||200);}
   drawPrism();
   if(state==='play'){var px=prism.x+prism.w/2,py=prism.y+prism.h/2;
-   if(curL){var cLx=curL.x+curL.w/2,cLy=curL.y+BH/2;drawBeam(px,py,cLx,cLy,curL.h,.4);cubeH(curL.x,curL.y,curL.w,curL.h);}
-   if(curR){var cRx=curR.x+curR.w/2,cRy=curR.y+BH/2;drawBeam(px,py,cRx,cRy,curR.h,.4);cubeH(curR.x,curR.y,curR.w,curR.h);}}}
+   if(curL){var cLx=curL.x+curL.w/2,cLy=curL.y+BH/2;var alphaL=deadBeamFadeL>0?(deadBeamFadeL/0.2)*0.4:0.4;drawBeam(px,py,cLx,cLy,curL.h,alphaL);cubeH(curL.x,curL.y,curL.w,curL.h);}
+   if(curR){var cRx=curR.x+curR.w/2,cRy=curR.y+BH/2;var alphaR=deadBeamFadeR>0?(deadBeamFadeR/0.2)*0.4:0.4;drawBeam(px,py,cRx,cRy,curR.h,alphaR);cubeH(curR.x,curR.y,curR.w,curR.h);}}}
  for(i=falls.length-1;i>=0;i--){var f=falls[i];f.t+=dt;f.vy+=1800*dt;f.y+=f.vy*dt;f.x+=f.vx*dt;f.r+=f.vr*dt;
   ctx.save();ctx.translate(f.x+f.w/2,f.y+BH/2);ctx.rotate(f.r);cubeH(-f.w/2,-BH/2,f.w,f.h,Math.max(0,1-f.t/0.8));ctx.restore();if(f.t>0.8)falls.splice(i,1);}
  for(i=rings.length-1;i>=0;i--){var r=rings[i];r.t+=dt;if(r.t<0)continue;
