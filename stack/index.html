@@ -13,6 +13,7 @@ canvas{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:
 #spectrum{display:flex;justify-content:center;gap:6px;margin-top:16px;height:24px}
 .spec{width:28px;height:18px;border-radius:4px;border:2px solid rgba(255,255,255,.3);box-sizing:border-box;transition:all .3s}
 .spec.lit{border-color:rgba(255,255,255,.8);box-shadow:0 0 8px rgba(255,255,255,.5)}
+#spectrum{display:none}
 #combo{font-size:24px;font-weight:700;color:#ffd34d;margin-top:12px;height:30px;opacity:0}
 #combo.play{animation:pf .95s forwards}
 @keyframes pf{0%{opacity:1;transform:scale(.6)}10%{transform:scale(1.15)}16%{transform:scale(1)}79%{opacity:1;transform:translateY(0)}100%{opacity:0;transform:translateY(-12px)}}
@@ -483,6 +484,35 @@ function drawPrism(){
 function drawBeam(x0,y0,x1,y1,h,a){ctx.save();ctx.globalAlpha=a||0.3;
  var grd=ctx.createLinearGradient(x0,y0,x1,y1);grd.addColorStop(0,colH(h,20));grd.addColorStop(1,colH(h,-10));ctx.strokeStyle=grd;ctx.lineWidth=3;ctx.shadowColor=colH(h,30);ctx.shadowBlur=8;
  ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.restore();}
+function drawSpectrum(){
+ // Horizontal capsule bar below prism/pedestal
+ var barW=W*0.45,barH=18,slotW=barW/6,gap=3;
+ var barX=W/2-barW/2,barY=prism.y+BH+DEP*0.5+20;
+ ctx.save();
+ // Dark background capsule
+ ctx.fillStyle='rgba(0,0,0,0.4)';
+ ctx.beginPath();
+ ctx.roundRect(barX,barY,barW,barH,barH/2);
+ ctx.fill();
+ // Draw 6 slots left-to-right
+ for(var i=0;i<6;i++){
+  var x=barX+gap+i*slotW,w=slotW-gap*2,h=barH-gap*2,y=barY+gap;
+  if(spectrum[i]===1){
+   // Lit: colored with glow
+   ctx.fillStyle=colH(SPEC_HUES[i],15);
+   ctx.shadowColor=colH(SPEC_HUES[i],30);
+   ctx.shadowBlur=8;
+  }else{
+   // Empty: dark unified cell
+   ctx.fillStyle='rgba(255,255,255,0.1)';
+   ctx.shadowBlur=0;
+  }
+  ctx.beginPath();
+  ctx.roundRect(x,y,w,h,h/2);
+  ctx.fill();
+ }
+ ctx.restore();
+}
 function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
  if(state==='play'){
   if(phase==='single'&&cur){cur.t+=dt*cur.spd;posCur();}
@@ -507,6 +537,7 @@ function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   for(var i=0;i<stack.length;i++){var s=stack[i];cubeH(s.x,s.y,s.w,s.h||200);}
   // Draw idle prism in single phase (darker, centered on tower)
   drawPrism();
+  drawSpectrum();
   // Draw beam from prism UP to moving slab
   if(cur&&state==='play'){
    var px=prism.x+prism.w/2,py=prism.y+prism.h/2;
@@ -519,6 +550,7 @@ function frame(ts){var dt=Math.min(.05,(ts-last)/1000||0);last=ts;
   for(var j=0;j<stackL.length;j++){var sL=stackL[j];cubeH(sL.x,sL.y,sL.w,sL.h||200);}
   for(var k=0;k<stackR.length;k++){var sR=stackR[k];cubeH(sR.x,sR.y,sR.w,sR.h||200);}
   drawPrism();
+  drawSpectrum();
   if(state==='play'){var px=prism.x+prism.w/2,py=prism.y+prism.h/2;
    if(curL){var cLx=curL.x+curL.w/2,cLy=curL.y+BH/2;var alphaL=deadBeamFadeL>0?(deadBeamFadeL/0.2)*0.4:0.4;drawBeam(px,py,cLx,cLy,curL.h,alphaL);cubeH(curL.x,curL.y,curL.w,curL.h);}
    if(curR){var cRx=curR.x+curR.w/2,cRy=curR.y+BH/2;var alphaR=deadBeamFadeR>0?(deadBeamFadeR/0.2)*0.4:0.4;drawBeam(px,py,cRx,cRy,curR.h,alphaR);cubeH(curR.x,curR.y,curR.w,curR.h);}}}
