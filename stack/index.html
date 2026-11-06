@@ -85,7 +85,7 @@ var SFX={place:function(){osc('triangle',220,110,.12,.4);noise(.03,.15,800);},
 var ZC=0,maxCombo=0,layers=0,BH,INITW,DEP,stack,stackL,stackR,cur,curL,curR,falls,rings,score,combo,state='start',cam=0,camT=0,flash=0,last=0,failT=-1,zoom=1,zoomT=1,zoomY=0;
 var phase='single',prism=null,spectrum=[0,0,0,0,0,0],burstCount=0,leftAlive=true,rightAlive=true,tutShown={};
 var SPEC_HUES=[0,30,60,120,210,270];
-var normalSuccessStreak=0,splitInitWidthL=0,splitInitWidthR=0,phaseOffset=0,postSplitLayers=0;
+var normalSuccessStreak=0,splitInitWidthL=0,splitInitWidthR=0,phaseOffset=0,postLossRemaining=0;
 // ========== APPROVED REMIX RULES CONSTANTS ==========
 // Perfect thresholds (px): layers 1-3: 4px; layers 4-6: 8px; layer 7+: 4px
 var PERFECT_THRESHOLD_NORMAL=4,PERFECT_THRESHOLD_SYNC=8;
@@ -106,66 +106,62 @@ var SPLIT_WIDTH_RATIO=0.48,SPLIT_WIDTH_SCREEN_CAP=0.28;
 // Verified: width=390, 3-Perfect split → both xL/xR inside sweep, synced dual-perfect window exists
 function col(i,dl){var L=THEMES[theme].L+(dl||0);return 'hsl('+((200+i*5)%360)+',65%,'+L+'%)';}
 function colH(h,dl){var L=THEMES[theme].L+(dl||0);return 'hsl('+h+',65%,'+L+'%)';}
-function hueDiff(h1,h2){var d=Math.abs(h1-h2);return Math.min(d,360-d);}
 function speedFor(n){var s=Math.min(2.5,Math.pow(1.03,n));if(n>40)s*=(1+(Math.random()*.3-.15));return s;}
 function spawn(){
  if(phase==='single'){var top=stack[stack.length-1],n=stack.length-7,dir=n%2?1:-1;
   cur={x:top.x,w:top.w,y:top.y-BH,i:top.i+1,dir:dir,t:0,spd:speedFor(n-1),ease:n>20&&Math.random()<.3,h:(200+top.i*5)%360};posCur();}
  else{
-  var maxN=Math.max(stackL.length,stackR.length)-7;
-  var baseSpd=speedFor(maxN-1);
-  // Layers 4-6 (postSplitLayers 1-3): 0.85× speed
-  if(postSplitLayers>=1&&postSplitLayers<=SYNC_LAYERS)baseSpd*=SYNC_SPEED_MULT;
-  // After one side loss, next 2 layers: additional 0.90× speed
-  if(phase==='single-after-loss'){
-   var layersSinceLoss=Math.max(stackL.length,stackR.length)-Math.max(stackL.length,stackR.length)+postSplitLayers;
-   var lossLayer=(leftAlive?stackR:stackL).length;
-   if(maxN-lossLayer<=POST_LOSS_DURATION)baseSpd*=POST_LOSS_SPEED_MULT;
-  }
+  // playing = layers + 1 (the layer about to be judged)
+  var playing=layers+1;
+  var baseSpd=speedFor(layers);
+  // Layers 4-6: 0.85× speed
+  if(playing>=4&&playing<=6)baseSpd*=SYNC_SPEED_MULT;
+  // Post-extinguish: next 2 spawned bars ×0.90
+  if(postLossRemaining>0){baseSpd*=POST_LOSS_SPEED_MULT;postLossRemaining--;}
+  // Compute phase offset for this layer: min(90, 15*(1+floor((playing-7)/3)))
+  if(playing>=7){phaseOffset=Math.min(MAX_PHASE_OFFSET_DEG,15*(1+Math.floor((playing-7)/3)));}
+  else{phaseOffset=0;}
   var yL=leftAlive?stackL[stackL.length-1].y-BH:0,yR=rightAlive?stackR[stackR.length-1].y-BH:0;
-  if(leftAlive){var topL=stackL[stackL.length-1];curL={x:topL.x,w:topL.w,y:yL,i:topL.i+1,dir:1,t:0,spd:baseSpd,ease:maxN>20&&Math.random()<.3,h:(topL.h+5)%360};}
-  if(rightAlive){var topR=stackR[stackR.length-1];curR={x:topR.x,w:topR.w,y:yR,i:topR.i+1,dir:1,t:0,spd:baseSpd,ease:maxN>20&&Math.random()<.3,h:(topR.h+5)%360};}
+  if(leftAlive){var topL=stackL[stackL.length-1];curL={x:topL.x,w:topL.w,y:yL,i:topL.i+1,dir:1,t:0,spd:baseSpd,ease:playing>20&&Math.random()<.3,h:(topL.h+5)%360};}
+  if(rightAlive){var topR=stackR[stackR.length-1];curR={x:topR.x,w:topR.w,y:yR,i:topR.i+1,dir:1,t:0,spd:baseSpd,ease:playing>20&&Math.random()<.3,h:(topR.h+180)%360};}
   posCurDual();}}
 function posCur(){var p=cur.t%2;p=p>1?2-p:p;if(cur.ease)p=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;if(cur.dir<0)p=1-p;cur.x=-cur.w*0.5+p*(W);}
 function posCurDual(){
- // Base phase from left side time (sync layers use same p, later layers add phase offset)
+ // Both sides use same base triangle wave p, with phase offset added to right
  var tBase=(curL?curL.t:(curR?curR.t:0));
  var pBase=tBase%2;pBase=pBase>1?2-pBase:pBase;
  if((curL&&curL.ease)||(curR&&curR.ease))pBase=pBase<.5?2*pBase*pBase:1-Math.pow(-2*pBase+2,2)/2;
  
- // Apply phase offset for right side
+ // Right side adds phase offset (degrees → triangle time)
  var phaseFraction=phaseOffset/360;
  var pLeft=pBase;
  var tRight=tBase+phaseFraction*2;
  var pRight=tRight%2;pRight=pRight>1?2-pRight:pRight;
- if((curR&&curR.ease)||(curL&&curL.ease))pRight=pRight<.5?2*pRight*pRight:1-Math.pow(-2*pRight+2,2)/2;
+ if(curR&&curR.ease)pRight=pRight<.5?2*pRight*pRight:1-Math.pow(-2*pRight+2,2)/2;
  
- // Sweep positioning: each bar swings only above its own tower, no center overlap
- // Both beams must reach their tower's Perfect point
- var px=prism.x+prism.w/2;
- if(curL){
-  var xL=stackL[stackL.length-1].x;
-  var topL=stackL[stackL.length-1];
-  // Left: sweeps from outer left edge toward (but not into) center gap
-  // Inner limit: prism left edge minus some spacing to avoid overlap
-  var outerL=Math.max(0,xL-W*0.22);
-  var innerL=prism.x-curL.w-8;
-  // Ensure xL is reachable
-  if(xL<outerL)outerL=xL-PERFECT_THRESHOLD_SYNC;
-  if(xL+PERFECT_THRESHOLD_SYNC>innerL)innerL=xL+curL.w+PERFECT_THRESHOLD_SYNC;
-  curL.x=outerL+pLeft*(innerL-outerL);
- }
- if(curR){
-  var xR=stackR[stackR.length-1].x;
-  var topR=stackR[stackR.length-1];
-  // Right: sweeps from (but not into) center gap outward toward right edge
-  // Inner limit: prism right edge plus some spacing to avoid overlap
-  var innerR=prism.x+prism.w+8;
-  var outerR=Math.min(W-curR.w,xR+W*0.22);
-  // Ensure xR is reachable
-  if(xR<innerR)innerR=xR-PERFECT_THRESHOLD_SYNC;
-  if(xR+curR.w+PERFECT_THRESHOLD_SYNC>outerR)outerR=xR+curR.w+PERFECT_THRESHOLD_SYNC;
-  curR.x=innerR+pRight*(outerR-innerR);
+ // Symmetric sweep: p=0 at outer, p=1 at inner (both move inward together)
+ // A = outer travel beyond Perfect, B = inner travel toward center
+ // Both use same A and B so Perfect occurs at same p
+ var playing=layers+1;
+ var thresh=(playing>=4&&playing<=6)?PERFECT_THRESHOLD_SYNC:PERFECT_THRESHOLD_NORMAL;
+ var A=Math.max(thresh,W*0.15);
+ var smallGap=16;
+ if(curL&&curR){
+  var xL=stackL[stackL.length-1].x,xR=stackR[stackR.length-1].x;
+  var maxB=(xR-xL-curL.w-curR.w-smallGap)/2;
+  var B=Math.max(thresh,Math.min(A,maxB));
+  // Left: curL.x = (xL - A) + p*(A + B), moves from outer toward inner
+  curL.x=(xL-A)+pLeft*(A+B);
+  // Right: curR.x = (xR + A) - p*(A + B), moves from outer toward inner (same direction)
+  curR.x=(xR+A)-pRight*(A+B);
+ }else if(curL){
+  var xL2=stackL[stackL.length-1].x;
+  var B2=Math.max(thresh,A);
+  curL.x=(xL2-A)+pLeft*(A+B2);
+ }else if(curR){
+  var xR2=stackR[stackR.length-1].x;
+  var B2=Math.max(thresh,A);
+  curR.x=(xR2+A)-pRight*(A+B2);
  }
 }
 function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=INITW*0.5;var x0=(W-INITW)/2-DEP*0.3;
@@ -174,7 +170,7 @@ function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=
  // Prism present from layer 1 (idle/translucent), activates on layer 3 split
  var baseY=H*0.62+7*BH;prism={x:W/2-W*0.07,w:W*0.14,y:baseY,h:BH,idle:true,activating:false,activateT:0};
  spectrum=[0,0,0,0,0,0];burstCount=0;leftAlive=true;rightAlive=true;tutShown={};
- normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postSplitLayers=0;
+ normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postLossRemaining=0;
  spawn();$('score').textContent=0;updateSpectrum();}
 function updateSpectrum(){var slots=document.querySelectorAll('.spec');for(var i=0;i<6;i++){slots[i].classList.toggle('lit',spectrum[i]===1);slots[i].style.background=spectrum[i]===1?'hsl('+SPEC_HUES[i]+',80%,60%)':'rgba(255,255,255,.1)';}}
 function addSpectrum(h){
@@ -186,10 +182,12 @@ function addSpectrum(h){
   var freq=440*Math.pow(2,next/12);
   osc('sine',freq,0,.08,.15);
   if(spectrum.every(function(v){return v===1})){
-   // Wait 350ms for burst recovery animation, then spawn next bar
-   setTimeout(function(){triggerBurst();setTimeout(function(){if(phase==='dual'||phase==='single-after-loss')spawn();},350);},100);
+   // Trigger burst after 100ms, then spawn after 0.35s recover
+   setTimeout(function(){triggerBurst();},100);
+   return true;
   }
  }
+ return false;
 }
 function triggerBurst(){
  burstCount++;score+=30;flash=2;showCombo('光谱爆发');
@@ -207,7 +205,10 @@ function triggerBurst(){
   nw=Math.max(top.w,Math.min(INITW,nw));
   recoverTargets.singleTop={from:top.w,to:nw,ref:top};
  }else if(phase==='dual'||phase==='single-after-loss'){
-  if(leftAlive&&rightAlive){
+  // Cannot revive if already game over (both dead)
+  if(!leftAlive&&!rightAlive){}
+  else if(leftAlive&&rightAlive){
+   // Both alive: 70% gap recovery
    var tL=stackL[stackL.length-1];
    var nwL=tL.w+(splitInitWidthL-tL.w)*BURST_RECOVER_PCT;
    nwL=Math.max(tL.w,Math.min(splitInitWidthL,nwL));
@@ -216,8 +217,9 @@ function triggerBurst(){
    var nwR=tR.w+(splitInitWidthR-tR.w)*BURST_RECOVER_PCT;
    nwR=Math.max(tR.w,Math.min(splitInitWidthR,nwR));
    recoverTargets.right={from:tR.w,to:nwR,ref:tR};
-  }else if(!leftAlive||!rightAlive){
-   // Revive at 50% of split-initial width
+  }else{
+   // One side dead: revive at 60% of initW, living side gets 70% recovery
+   // Note: revive width is 60% (0.6), not 50%
    if(!leftAlive){
     var reviveW=splitInitWidthL*BURST_REVIVE_PCT;
     var xL=prism.x-reviveW-10;
@@ -232,6 +234,7 @@ function triggerBurst(){
     stackR.push({x:xR,w:reviveWR,y:baseR.y-BH*(stackR.length-7),i:baseR.i+stackR.length,h:(200+180)%360});
     rightAlive=true;
    }
+   // Living side recovery
    if(leftAlive){
     var tL2=stackL[stackL.length-1];
     var nwL2=tL2.w+(splitInitWidthL-tL2.w)*BURST_RECOVER_PCT;
@@ -247,7 +250,7 @@ function triggerBurst(){
    phase='dual';
   }
  }
- // Animate recovery over 0.35s before spawning next bar
+ // Animate recovery over 0.35s THEN spawn next bar
  var startT=Date.now();
  var recoverInterval=setInterval(function(){
   var elapsed=(Date.now()-startT)/1000;
@@ -267,7 +270,11 @@ function triggerBurst(){
    var newWR=tR.from+(tR.to-tR.from)*progress;
    tR.ref.x-=(newWR-tR.ref.w)/2;tR.ref.w=newWR;
   }
-  if(progress>=1)clearInterval(recoverInterval);
+  if(progress>=1){
+   clearInterval(recoverInterval);
+   // Spawn after recovery completes
+   if(phase==='dual'||phase==='single-after-loss')spawn();
+  }
  },16);
  rings.push({burst:true,t:0});spectrum=[0,0,0,0,0,0];updateSpectrum();
 }
@@ -331,16 +338,18 @@ function drop(){
   if(layers===3){splitTower();}else{spawn();}
  }else dropDual();}
 function dropDual(){
- postSplitLayers++;
- // Threshold: 8px for layers 4-6 (postSplitLayers 1-3), 4px for layer 7+
- var threshold=(postSplitLayers<=SYNC_LAYERS)?PERFECT_THRESHOLD_SYNC:PERFECT_THRESHOLD_NORMAL;
+ // Ignore taps when bars don't exist (during split activation)
+ if(!curL&&!curR)return;
+ // playing = layers + 1 (layer being judged now)
+ var playing=layers+1;
+ var threshold=(playing>=4&&playing<=6)?PERFECT_THRESHOLD_SYNC:PERFECT_THRESHOLD_NORMAL;
  var perfL=false,perfR=false,missL=false,missR=false,scoreL=0,scoreR=0;
+ var wasLeftAlive=leftAlive,wasRightAlive=rightAlive;
  if(leftAlive&&curL){
   var topL=stackL[stackL.length-1],dL=curL.x-topL.x;
   if(Math.abs(dL)<=threshold){
    perfL=true;curL.x=topL.x;normalSuccessStreak=0;
-   var growL=stackL.filter(function(s){return s.y<curL.y}).length>=2;
-   if(growL){var nwL=Math.min(splitInitWidthL,curL.w*1.04);curL.x-=(nwL-curL.w)/2;curL.w=nwL;}
+   if(combo>=2){var nwL=Math.min(splitInitWidthL,curL.w*1.04);curL.x-=(nwL-curL.w)/2;curL.w=nwL;}
    scoreL=3;flash=Math.max(flash,0.7);
    rings.push({b:{x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h},t:0,side:'L'});
   }else{
@@ -357,8 +366,7 @@ function dropDual(){
   var topR=stackR[stackR.length-1],dR=curR.x-topR.x;
   if(Math.abs(dR)<=threshold){
    perfR=true;curR.x=topR.x;normalSuccessStreak=0;
-   var growR=stackR.filter(function(s){return s.y<curR.y}).length>=2;
-   if(growR){var nwR=Math.min(splitInitWidthR,curR.w*1.04);curR.x-=(nwR-curR.w)/2;curR.w=nwR;}
+   if(combo>=2){var nwR=Math.min(splitInitWidthR,curR.w*1.04);curR.x-=(nwR-curR.w)/2;curR.w=nwR;}
    scoreR=3;flash=Math.max(flash,0.7);
    rings.push({b:{x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h},t:0,side:'R'});
   }else{
@@ -372,38 +380,49 @@ function dropDual(){
   }
  }
  if(missL&&missR)return gameOverDual();
- if(missL||missR){SFX.towerOut();showTut('oneSide','一侧熄灭了，守住另一侧');phase='single-after-loss';normalSuccessStreak=0;}
+ // Track extinguish and set post-loss speed counter
+ if((missL||missR)&&!(missL&&missR)){
+  SFX.towerOut();showTut('oneSide','一侧熄灭了，守住另一侧');
+  phase='single-after-loss';normalSuccessStreak=0;
+  postLossRemaining=2;
+  // Null the dead side's bar so it stops rendering
+  if(missL)curL=null;
+  if(missR)curR=null;
+ }
  // Scoring and spectrum
+ var burstWillTrigger=false;
  if(perfL&&perfR){
   combo++;if(combo>maxCombo)maxCombo=combo;
   score+=10;flash=1.5;
   showCombo('双折完美');SFX.dualPerfect();
-  addSpectrum(curL.h);addSpectrum(curR.h);
+  addSpectrum(curL.h);
+  burstWillTrigger=addSpectrum(curR.h);
   if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}
  }else if(perfL||perfR){
   combo++;if(combo>maxCombo)maxCombo=combo;
   score+=scoreL+scoreR;
   showCombo(combo>1?'PERFECT ×'+combo:'PERFECT');SFX.perfect(combo);
-  if(perfL){addSpectrum(curL.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
-  if(perfR){addSpectrum(curR.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
+  if(perfL){burstWillTrigger=addSpectrum(curL.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
+  if(perfR){burstWillTrigger=addSpectrum(curR.h);if(!tutShown.spectrumFirst){tutShown.spectrumFirst=true;showTut('spectrumFirst','完美点亮光谱');}}
  }else{
   if(combo>0)SFX.brk();combo=0;
   score+=scoreL+scoreR;SFX.place();
-  // Normal success counter: per tap (at least one side landed, no Perfect)
-  // This tap counts as 1 toward 3, not per-side
+  // Normal success counter: per tap, not per side
   if(!missL&&!missR&&(leftAlive||rightAlive)){
    normalSuccessStreak+=1;
-   if(normalSuccessStreak>=3){addSpectrum((curL||curR).h);normalSuccessStreak=0;}
+   if(normalSuccessStreak>=3){burstWillTrigger=addSpectrum((curL||curR).h);normalSuccessStreak=0;}
   }
  }
- if(leftAlive&&curL){layers++;stackL.push({x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h});}
- if(rightAlive&&curR){layers++;stackR.push({x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h});}
+ // Push blocks and increment layers ONCE per tap (not twice)
+ var anySideLanded=false;
+ if(leftAlive&&curL&&!missL){stackL.push({x:curL.x,w:curL.w,y:curL.y,i:curL.i,h:curL.h});anySideLanded=true;}
+ if(rightAlive&&curR&&!missR){stackR.push({x:curR.x,w:curR.w,y:curR.y,i:curR.i,h:curR.h});anySideLanded=true;}
+ if(anySideLanded)layers++;
  $('score').textContent=score;
- // Update phase offset: phaseDeg = min(90, 15 * (1 + floor((n-7)/3)))
- // Layers 7-9: 15°, 10-12: 30°, 13-15: 45°, etc.
- var totalLayers=layers;
- if(totalLayers>=7){phaseOffset=Math.min(MAX_PHASE_OFFSET_DEG,15*(1+Math.floor((totalLayers-7)/3)));}
- var alive=leftAlive?stackL:stackR,sy2=(alive[alive.length-1].y)+camT;if(sy2<H*0.45)camT+=H*0.45-sy2;spawn();}
+ var alive=leftAlive?stackL:stackR,sy2=(alive[alive.length-1].y)+camT;if(sy2<H*0.45)camT+=H*0.45-sy2;
+ // If burst will trigger, skip immediate spawn - burst will spawn after 0.35s recover
+ if(!burstWillTrigger)spawn();
+}
 function mkFall(x,w,c,s){s=s||(Math.random()<.5?-1:1);return{x:x,w:w,y:c.y,vy:0,vx:60*s,r:0,vr:s*Math.PI/2,i:c.i,h:c.h||200,t:0};}
 function gameOver(){state='over';failT=0;prevBest=best;SFX.fail();if(navigator.vibrate)navigator.vibrate(40);
  if(score>best){best=score;lss('stack_best',best);}
