@@ -169,7 +169,7 @@ var phase='single',prism=null,spectrum=[0,0,0,0,0,0],burstCount=0,leftAlive=true
 var SPEC_HUES=[0,30,60,120,210,270];
 var normalSuccessStreak=0,splitInitWidthL=0,splitInitWidthR=0,phaseOffset=0,postLossRemaining=0,deadBeamFadeL=0,deadBeamFadeR=0;
 var shatterL=null,shatterR=null,splitAnim=null,spectrumFlash=0,pedestalLock=null;
-var VIS_BASE=5,tutGen=0,tutHideTimer=0,tutClearTimer=0;
+var VIS_BASE=5,tutGen=0,tutHideTimer=0,tutClearTimer=0,guideLockUntil=0,pendingGuide=null;
 // ========== APPROVED REMIX RULES CONSTANTS ==========
 // Perfect thresholds (px): layers 1-3: 4px; layers 4-6: 8px; layer 7+: 4px
 var PERFECT_THRESHOLD_NORMAL=4,PERFECT_THRESHOLD_SYNC=8;
@@ -258,7 +258,7 @@ function reset(){BH=Math.max(22,Math.round(H*0.04));INITW=Math.round(W*0.5);DEP=
  spectrum=[0,0,0,0,0,0];burstCount=0;leftAlive=true;rightAlive=true;tutShown={};
  normalSuccessStreak=0;splitInitWidthL=0;splitInitWidthR=0;phaseOffset=0;postLossRemaining=0;deadBeamFadeL=0;deadBeamFadeR=0;
  cur=null;curL=null;curR=null;shatterL=null;shatterR=null;splitAnim=null;spectrumFlash=0;pedestalLock=null;
- spawn();dismissTut();syncPrism();updatePlayCamera();cam=camT;zoom=zoomT;$('score').textContent=0;updateSpectrum();}
+ spawn();dismissTut(true);var comboEl=$('combo');if(comboEl){comboEl.textContent='';comboEl.classList.remove('play');}syncPrism();updatePlayCamera();cam=camT;zoom=zoomT;$('score').textContent=0;updateSpectrum();}
 function updateSpectrum(){var slots=document.querySelectorAll('.spec');for(var i=0;i<6;i++){slots[i].classList.toggle('lit',spectrum[i]===1);slots[i].style.background=spectrum[i]===1?'hsl('+SPEC_HUES[i]+',80%,60%)':'rgba(255,255,255,.1)';}}
 function addSpectrum(h,wasLeft,wasRight){
  var next=-1;
@@ -365,7 +365,10 @@ function triggerBurst(wasLeftAlive,wasRightAlive){
  setTimeout(function(){spectrum=[0,0,0,0,0,0];updateSpectrum();spectrumFlash=0;},300);
 }
 function showCombo(t,sizeMult){var c=$('combo');c.textContent=t;c.style.fontSize=(24*(sizeMult||1))+'px';c.classList.remove('play');void c.offsetWidth;c.classList.add('play');}
-function dismissTut(){
+function guideLocked(){return guideLockUntil>Date.now();}
+function dismissTut(force){
+ if(!force&&guideLocked())return;
+ pendingGuide=null;guideLockUntil=0;
  tutGen++;
  if(tutHideTimer){clearTimeout(tutHideTimer);tutHideTimer=0;}
  if(tutClearTimer){clearTimeout(tutClearTimer);tutClearTimer=0;}
@@ -375,6 +378,8 @@ function dismissTut(){
  el.style.fontSize='';el.style.fontWeight='';el.style.letterSpacing='';el.style.whiteSpace='';el.style.width='';el.style.textShadow='';
 }
 function showGuide(key,html,mode){
+ // The split title stays up for its full read. Other guides wait until it expires.
+ if(guideLocked()&&key!=='split'){if(!(key&&tutShown[key]))pendingGuide={key:key,html:html,mode:mode};return;}
  if(key){if(tutShown[key])return;tutShown[key]=true;}
  if(tutHideTimer){clearTimeout(tutHideTimer);tutHideTimer=0;}
  if(tutClearTimer){clearTimeout(tutClearTimer);tutClearTimer=0;}
@@ -383,10 +388,15 @@ function showGuide(key,html,mode){
  el.innerHTML=title?html:('<i></i>'+html);
  el.style.fontSize='';el.style.fontWeight='';el.style.letterSpacing='';el.style.whiteSpace='';el.style.width='';el.style.textShadow='';
  el.style.left=(W/2)+'px';el.style.top=(H*0.30)+'px';el.style.opacity='1';el.classList.remove('hide');
+ if(key==='split')guideLockUntil=Date.now()+2000;
  tutHideTimer=setTimeout(function(){
   if(gen!==tutGen)return;
   el.style.opacity='0';
-  tutClearTimer=setTimeout(function(){if(gen!==tutGen)return;el.classList.add('hide');el.innerHTML='';el.classList.remove('title');},420);
+  tutClearTimer=setTimeout(function(){
+   if(gen!==tutGen)return;
+   el.classList.add('hide');el.innerHTML='';el.classList.remove('title');
+   if(key==='split'){guideLockUntil=0;var p=pendingGuide;pendingGuide=null;if(p)showGuide(p.key,p.html,p.mode);}
+  },420);
  },2000);
 }
 function splitTower(){
@@ -425,13 +435,13 @@ function splitTower(){
   stackR.push({x:s.x,w:s.w,y:s.y,i:s.i,h:oh,oh:oh,fh:(oh+180)%360,ox:s.x,ow:s.w,fx:xR,fw:baseW});
  }
  cur=null;curL=null;curR=null;leftAlive=true;rightAlive=true;
- // After 0.6s activation, show text and spawn bars
+ // Title goes up while taps are ignored, and stays for about 2s even if the next drop wants another guide.
+ showGuide('split','光一分为二','title');
  setTimeout(function(){
   if(phase==='dual'){
    prism.activating=false;
    snapSplit();
    splitAnim=null;
-   showGuide('split','光一分为二','title');
    SFX.split();
    if(navigator.vibrate)navigator.vibrate([60,30,100]);
    spawn();
@@ -637,14 +647,14 @@ function snapSplit(){
  function snap(st){for(var i=VIS_BASE;i<st.length;i++){var b=st[i];if(b.fx==null)continue;b.x=b.fx;b.w=b.fw;if(b.fh!=null)b.h=b.fh;}}
  snap(stackL);snap(stackR);
 }
-function gameOver(){state='over';failT=0;prevBest=best;stopBGM();SFX.fail();clearDebris();dismissTut();if(navigator.vibrate)navigator.vibrate(40);
+function gameOver(){state='over';failT=0;prevBest=best;stopBGM();SFX.fail();clearDebris();dismissTut(true);if(navigator.vibrate)navigator.vibrate(40);
  if(score>best){best=score;lss('stack_best',best);}
  setTimeout(function(){
   var topY,botY,ped=pedestalGeom();if(phase==='single'){topY=stack[stack.length-1].y-DEP*0.35;}
   else{topY=Math.min(stackL[stackL.length-1].y,stackR[stackR.length-1].y)-DEP*0.35;}
   botY=ped.y+ped.h;
   var hgt=botY-topY+60,rT=H*0.40,rB=H*0.80;zoomT=Math.max(0.12,Math.min(0.75,(rB-rT)/hgt));ZC=(rT+rB)/2;camT=ZC-(topY+botY)/2;},600);
- setTimeout(function(){clearDebris();dismissTut();$('fs').textContent=score;$('fb').textContent='最高分 '+best;$('nr').classList.toggle('hide',!(score>prevBest));
+ setTimeout(function(){clearDebris();dismissTut(true);$('fs').textContent=score;$('fb').textContent='最高分 '+best;$('nr').classList.toggle('hide',!(score>prevBest));
   $('share').classList.toggle('hide',!navigator.share);$('hud').classList.add('hide');$('tut').classList.add('hide');$('over').classList.remove('hide');$('tools').classList.remove('hide');
   lockUntil=Date.now()+500;$('btns').classList.add('lock');setTimeout(function(){$('btns').classList.remove('lock')},500);},1400);}
 function gameOverDual(){gameOver();}
