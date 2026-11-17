@@ -1,0 +1,220 @@
+{
+  "version": "m1-v1.1",
+  "grid": {
+    "cols": 6,
+    "rows": 6,
+    "origin": "top-left, col 0..5, row 0..5, flow goes down (row increasing)"
+  },
+  "presetLanes": [
+    [
+      0,
+      1
+    ],
+    [
+      1,
+      1
+    ],
+    [
+      2,
+      1
+    ],
+    [
+      3,
+      1
+    ],
+    [
+      4,
+      1
+    ],
+    [
+      5,
+      1
+    ],
+    [
+      0,
+      3
+    ],
+    [
+      1,
+      3
+    ],
+    [
+      2,
+      3
+    ],
+    [
+      3,
+      3
+    ],
+    [
+      4,
+      3
+    ],
+    [
+      5,
+      3
+    ]
+  ],
+  "presetLanesNote": "[row, col]; col 1 and col 3 are two narrow lanes, col 2 rock between them",
+  "sources": {
+    "A": {
+      "narrowCol": 1,
+      "wideCols": [
+        1,
+        2
+      ]
+    },
+    "B": {
+      "narrowCol": 3,
+      "wideCols": [
+        3,
+        4
+      ]
+    }
+  },
+  "exit": {
+    "row": "below 5",
+    "cols": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "note": "any cargo leaving row 5 downward exits"
+  },
+  "tuning": {
+    "tickSec": 0.25,
+    "cellsPerSec": 2,
+    "digSecPerCell": 0.4,
+    "fillSecPerCell": 0.4,
+    "digQueueMax": 4,
+    "laneQuota": 18,
+    "minGapCells": 1,
+    "widePreviewSec": 5,
+    "sourceQueueMax": 3,
+    "cargoTimeoutSec": 20,
+    "timeoutsToFail": 3,
+    "jamShakeAfterSec": 1.0,
+    "jamShakeCooldownSec": 2.0,
+    "spawnStopSec": 75,
+    "clearGraceSec": 15,
+    "erodeIdleSec": 6,
+    "erodeWarnSec": 2,
+    "wideJitterSec": 2,
+    "firstWideGraceSec": 0,
+    "wideJitterStepSec": 0.5
+  },
+  "waves": [
+    {
+      "wave": 1,
+      "tStart": 0,
+      "tEnd": 20,
+      "narrow": [
+        {
+          "source": "A",
+          "intervalSec": 1.6,
+          "firstAtSec": 0.5
+        }
+      ],
+      "wide": []
+    },
+    {
+      "wave": 2,
+      "tStart": 20,
+      "tEnd": 45,
+      "narrow": [
+        {
+          "source": "A",
+          "intervalSec": 1.4,
+          "firstAtSec": 20
+        },
+        {
+          "source": "B",
+          "intervalSec": 1.4,
+          "firstAtSec": 20.7
+        }
+      ],
+      "wide": [
+        {
+          "source": "A",
+          "atSec": 32
+        }
+      ]
+    },
+    {
+      "wave": 3,
+      "tStart": 45,
+      "tEnd": 75,
+      "narrow": [
+        {
+          "source": "A",
+          "intervalSec": 1.2,
+          "firstAtSec": 45
+        },
+        {
+          "source": "B",
+          "intervalSec": 1.2,
+          "firstAtSec": 45.6
+        }
+      ],
+      "wide": [
+        {
+          "source": "B",
+          "atSec": 55
+        },
+        {
+          "source": "A",
+          "atSec": 68
+        }
+      ]
+    }
+  ],
+  "strings": {
+    "win": {
+      "zh": "让开了",
+      "en": "Way made"
+    },
+    "failJam": {
+      "zh": "{gate} 口堵死了",
+      "en": "Gate {gate} backed up"
+    },
+    "failTime": {
+      "zh": "三托货没等到",
+      "en": "Three loads gave up"
+    },
+    "quota": {
+      "zh": "巷 {used}/{max}",
+      "en": "Lanes {used}/{max}"
+    },
+    "failClear": {
+      "zh": "收尾没清完",
+      "en": "Lanes not cleared"
+    },
+    "failJamWide": {
+      "zh": "{gate} 口被宽货堵住了",
+      "en": "Gate {gate} jammed by a wide load"
+    },
+    "failJamWideHint": {
+      "zh": "宽货要一整条两格宽的道，从上通到底",
+      "en": "Wide loads need a 2-wide lane all the way down"
+    },
+    "failJamHint": {
+      "zh": "货进不来了：腾出路，或换一条走",
+      "en": "Cargo can't get in: clear a path"
+    },
+    "collapse": {
+      "zh": "没人走，塌了",
+      "en": "Unused, collapsed"
+    }
+  },
+  "clearGraceRule": "if any cargo remains on board or in a queue when clearGraceSec ends, fail with strings.failClear",
+  "rulesV11": {
+    "erode": "player-dug lane cells (not presetLanes) collapse to rock after erodeIdleSec with no cargo on them; crack visual erodeWarnSec before; collapse refunds quota; cells with a queued or in-progress action never collapse; a cell's idle timer resets whenever any cargo (narrow or either half of a wide) occupies it, and starts when it is dug; a cell does not count idle while any cargo is in the same column at a higher row (prevents dead-end traps)",
+    "wideJitter": "each wide spawn time = atSec + uniform(-wideJitterSec, +wideJitterSec), drawn once per run from a seed; preview starts widePreviewSec before the jittered time; debug panel shows seed and can lock it; the jittered time is snapped to a multiple of wideJitterStepSec (0.5 s) before use",
+    "noGrace": "no hidden grace for any cargo; a cargo's 20 s timer runs from birth including queue time (firstWideGraceSec = 0)",
+    "tapCancel": "tapping a cell that already has a queued or in-progress action cancels that action (intended)",
+    "failOrder": "if failA and failB conditions hit on the same tick, failA wins (unchanged in M1)"
+  }
+}

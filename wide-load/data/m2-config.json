@@ -1,0 +1,2054 @@
+{
+  "version": "m2-v0.2",
+  "baseVersion": "m1-v1.1",
+  "note": "8 boards. tuning/strings/rules shared by all boards, copied verbatim from m1-v1.1; a board may override ONLY laneQuota = preset lane cells (forks excluded) + one full column (grid.rows). Each board has the same shape as data/m1-config.json in next-build bcf91cf (grid, presetLanes, forks, sources, exit, waves).",
+  "tuning": {
+    "tickSec": 0.25,
+    "cellsPerSec": 2,
+    "digSecPerCell": 0.4,
+    "fillSecPerCell": 0.4,
+    "digQueueMax": 4,
+    "laneQuota": 18,
+    "minGapCells": 1,
+    "widePreviewSec": 5,
+    "sourceQueueMax": 3,
+    "cargoTimeoutSec": 20,
+    "timeoutsToFail": 3,
+    "jamShakeAfterSec": 1.0,
+    "jamShakeCooldownSec": 2.0,
+    "spawnStopSec": 75,
+    "clearGraceSec": 15,
+    "erodeIdleSec": 6,
+    "erodeWarnSec": 2,
+    "wideJitterSec": 2,
+    "firstWideGraceSec": 0,
+    "wideJitterStepSec": 0.5
+  },
+  "strings": {
+    "win": {
+      "zh": "让开了",
+      "en": "Way made"
+    },
+    "failJam": {
+      "zh": "{gate} 口堵死了",
+      "en": "Gate {gate} backed up"
+    },
+    "failTime": {
+      "zh": "三托货没等到",
+      "en": "Three loads gave up"
+    },
+    "quota": {
+      "zh": "巷 {used}/{max}",
+      "en": "Lanes {used}/{max}"
+    },
+    "failClear": {
+      "zh": "收尾没清完",
+      "en": "Lanes not cleared"
+    },
+    "failJamWide": {
+      "zh": "{gate} 口被宽货堵住了",
+      "en": "Gate {gate} jammed by a wide load"
+    },
+    "failJamWideHint": {
+      "zh": "宽货要一整条两格宽的道，从上通到底",
+      "en": "Wide loads need a 2-wide lane all the way down"
+    },
+    "failJamHint": {
+      "zh": "货进不来了：腾出路，或换一条走",
+      "en": "Cargo can't get in: clear a path"
+    },
+    "failStuckWide": {
+      "zh": "宽货卡住，挡住了 {gate} 口",
+      "en": "Wide load stuck, blocking Gate {gate}"
+    },
+    "failStuckWideHint": {
+      "zh": "先把宽货下面的路挖通到底",
+      "en": "Dig its lane through to the bottom first"
+    },
+    "collapse": {
+      "zh": "没人走，塌了",
+      "en": "Unused, collapsed"
+    },
+    "hardRockDenied": {
+      "zh": "硬岩挖不动",
+      "en": "Bedrock. Can't dig"
+    },
+    "exitMark": {
+      "zh": "出口",
+      "en": "Exit"
+    }
+  },
+  "clearGraceRule": "if any cargo remains on board or in a queue when clearGraceSec ends, fail with strings.failClear",
+  "rulesV11": {
+    "erode": "player-dug lane cells (not presetLanes) collapse to rock after erodeIdleSec with no cargo on them; crack visual erodeWarnSec before; collapse refunds quota; cells with a queued or in-progress action never collapse; a cell's idle timer resets whenever any cargo (narrow or either half of a wide) occupies it, and starts when it is dug; a cell does not count idle while any cargo is in the same column at a higher row (prevents dead-end traps)",
+    "wideJitter": "each wide spawn time = atSec + uniform(-wideJitterSec, +wideJitterSec), drawn once per run from a seed; preview starts widePreviewSec before the jittered time; debug panel shows seed and can lock it; the jittered time is snapped to a multiple of wideJitterStepSec (0.5 s) before use",
+    "noGrace": "no hidden grace for any cargo; a cargo's 20 s timer runs from birth including queue time (firstWideGraceSec = 0)",
+    "tapCancel": "tapping a cell that already has a queued or in-progress action cancels that action (intended)",
+    "failOrder": "if failA and failB conditions hit on the same tick, failA wins (unchanged in M1)"
+  },
+  "mapLegend": {
+    "#": "rock",
+    "L": "preset lane",
+    "H": "hard rock",
+    "<": "fork, arrow left",
+    ">": "fork, arrow right",
+    "E": "exit below this column",
+    "x": "no exit below this column",
+    "_note": "documentation only; presetLanes/hardRocks/forks/exit.cols are authoritative; last line is the exit row"
+  },
+  "newFields": {
+    "boards": "EXISTING SHAPE, NEW CONTAINER: array of per-board configs; boards[0] is m1-v1.1 unchanged",
+    "boards[].id / name": "NEW: board number 1-8 and display name {zh,en}",
+    "boards[].grid.rows": "NEW SEMANTICS: rows may differ from cols (board 3 is 6 cols x 7 rows). Code currently uses GRID=cols for both dims",
+    "boards[].laneQuota": "per-board quota = preset lane cells (forks excluded) + one full column (grid.rows); producer-approved. Board 1 = 18 unchanged",
+    "boards[].hardRocks": "NEW: [row,col] list. Hard rock = rock that cannot be dug; tap gives deniedDig shake + strings.hardRockDenied; never a lane, never counts toward quota, never erodes; for cargo movement identical to rock",
+    "boards[].exit.cols": "EXISTING FIELD, NEW SEMANTICS (code ignores it today): only these columns exit. Narrow on the last row exits only if its column is in exit.cols; otherwise 'below' counts as blocked and it uses the normal M1 sidestep rule (a neighbor lane counts as having 'lane below' iff that neighbor's column is in exit.cols). Wide exits only if both of its columns are in exit.cols; otherwise it waits (will time out)",
+    "boards[].forks": "SAME FORMAT AS bcf91cf M1Config.forks (ForkSpec): [{r, c, dir:'left'|'right'}]. Fork cells are lanes but NOT listed in presetLanes, not counted in quota, never erode, cannot be filled; tap flips. Checked against bcf91cf src/sim/types.ts, simulation.ts and data/fork-debug.json",
+    "boards[].map / intent / expectedPlay / simStatus / copiedFrom": "DOC ONLY, loader may ignore",
+    "strings.hardRockDenied / exitMark": "NEW strings",
+    "sources.C (board 7)": "NEW, not in code: third gate. At most two gates ship at once, enforced by the wave table (wave1 A, wave2 A+C, wave3 C+B). Needs SourceId 'C', a third queue + queue pips, fail A strings with {gate}=C",
+    "hardRocks + column swipe": "per programmer: a column swipe stops at a hard rock; the hard rock and cells below it are not queued",
+    "boards[].failBRoute": "DOC ONLY: scripted wrong-fork route that must end in fail B first (boards 4, 6, 8)"
+  },
+  "tutorial": [
+    {
+      "id": "tut1",
+      "step": 1,
+      "name": {
+        "zh": "挖巷",
+        "en": "Dig"
+      },
+      "grid": {
+        "cols": 3,
+        "rows": 4,
+        "origin": "top-left, col 0..2, row 0..3, flow goes down (row increasing)"
+      },
+      "laneQuota": 7,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ]
+      ],
+      "dugLanes": [],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            0,
+            1
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 3",
+        "cols": [
+          0,
+          1,
+          2
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        }
+      ],
+      "prompt": {
+        "zh": "点岩石，挖出一条巷",
+        "en": "Tap rock to dig a lane"
+      },
+      "goal": {
+        "type": "deliverNarrow",
+        "count": 3
+      },
+      "noFail": true,
+      "skippable": true,
+      "noJitter": true,
+      "map": [
+        "#L#",
+        "#L#",
+        "#L#",
+        "###",
+        "EEE"
+      ],
+      "intent": "one tap opens the only exit; narrows flow out on their own",
+      "expectedPlay": "tap [3,1] (or swipe); 3 narrows delivered at ~5.75s",
+      "simStatus": "preset play on bcf91cf /tmp copy (3x4 as 4x4 with col 3 sealed): goal at 5.75s, 0 timeouts, lanes 4/7"
+    },
+    {
+      "id": "tut2",
+      "step": 2,
+      "name": {
+        "zh": "合成宽道",
+        "en": "Go Wide"
+      },
+      "grid": {
+        "cols": 4,
+        "rows": 5,
+        "origin": "top-left, col 0..3, row 0..4, flow goes down (row increasing)"
+      },
+      "laneQuota": 10,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ]
+      ],
+      "dugLanes": [],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            1,
+            2
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 4",
+        "cols": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 5
+            }
+          ]
+        }
+      ],
+      "prompt": {
+        "zh": "宽货来了，把两条窄巷并成宽道",
+        "en": "A wide load is coming. Join two narrow lanes into one."
+      },
+      "goal": {
+        "type": "deliverWide",
+        "count": 1
+      },
+      "noFail": true,
+      "skippable": true,
+      "noJitter": true,
+      "map": [
+        "#L##",
+        "#L##",
+        "#L##",
+        "#L##",
+        "#L##",
+        "EEEE"
+      ],
+      "intent": "wide preview shows at t=0; dig col 2 next to the preset lane before the wide spawns at 5s",
+      "expectedPlay": "dig col 2 rows 0-4 right away (2.0s); wide spawns at 5s and exits at ~7.5s",
+      "simStatus": "preset play on bcf91cf /tmp copy (4x5 as 5x5 with col 4 sealed): goal at 7.50s, 0 timeouts, lanes 10/10"
+    },
+    {
+      "id": "tut3",
+      "step": 3,
+      "name": {
+        "zh": "旧巷会塌",
+        "en": "Let It Collapse"
+      },
+      "grid": {
+        "cols": 4,
+        "rows": 5,
+        "origin": "top-left, col 0..3, row 0..4, flow goes down (row increasing)"
+      },
+      "laneQuota": 15,
+      "presetLanes": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          3
+        ]
+      ],
+      "dugLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ]
+      ],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 0,
+          "wideCols": [
+            0,
+            1
+          ]
+        },
+        "B": {
+          "narrowCol": 3,
+          "wideCols": [
+            2,
+            3
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 4",
+        "cols": [
+          0,
+          1,
+          2,
+          3
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "B",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 2
+            },
+            {
+              "source": "B",
+              "atSec": 16
+            }
+          ]
+        }
+      ],
+      "prompt": {
+        "zh": "不用的巷会自己塌，额度会还给你",
+        "en": "Unused lanes collapse and give back your quota"
+      },
+      "goal": {
+        "type": "deliverWide",
+        "count": 2
+      },
+      "noFail": true,
+      "skippable": true,
+      "noJitter": true,
+      "map": [
+        "LD#L",
+        "LD#L",
+        "LD#L",
+        "LD#L",
+        "LD#L",
+        "EEEE"
+      ],
+      "intent": "quota is full (15/15) with col 1 open; first wide (A) uses it at 2s, col 1 then idles and collapses by ~10.3s, quota returns to 10/15; B wide preview at 11s, dig col 2, B wide spawns at 16s",
+      "expectedPlay": "wait (or fill col 1 by hand); after collapse, on B preview dig col 2 rows 0-4; second wide exits at ~18.75s. Digging col 2 before the collapse is refused by quota (that is the lesson)",
+      "simStatus": "preset play (dig col 2 at 11.5s): goal at 18.75s, lanes 15/15. Do-nothing check: first wide exits 4.5s, col 1 warns ~8s, fully collapsed at 10.25s (< second wide 16s), quota back to 10/15"
+    }
+  ],
+  "boards": [
+    {
+      "id": 1,
+      "name": {
+        "zh": "第一只宽货",
+        "en": "First Wide Load"
+      },
+      "copiedFrom": "m1-v1.1 (unchanged)",
+      "grid": {
+        "cols": 6,
+        "rows": 6,
+        "origin": "top-left, col 0..5, row 0..5, flow goes down (row increasing)"
+      },
+      "laneQuota": 18,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          3
+        ]
+      ],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            1,
+            2
+          ]
+        },
+        "B": {
+          "narrowCol": 3,
+          "wideCols": [
+            3,
+            4
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 5",
+        "cols": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "note": "any cargo leaving row 5 downward exits"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 32
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 55
+            },
+            {
+              "source": "A",
+              "atSec": 68
+            }
+          ]
+        }
+      ],
+      "map": [
+        "#L#L##",
+        "#L#L##",
+        "#L#L##",
+        "#L#L##",
+        "#L#L##",
+        "#L#L##",
+        "EEEEEE"
+      ],
+      "intent": "M1 signed board, unchanged",
+      "expectedPlay": "A wide: dig col 2 on preview; B wide: col 2 collapses or SAFE-fill it, dig col 4; second A wide: dig col 2 again",
+      "simStatus": "sim 300 seeds on 3bb4fa4 sim layer: d5 300, d2 300, d0 291, d-1 69, fixed 0/300"
+    },
+    {
+      "id": 2,
+      "name": {
+        "zh": "硬岩",
+        "en": "Bedrock"
+      },
+      "grid": {
+        "cols": 6,
+        "rows": 6,
+        "origin": "top-left, col 0..5, row 0..5, flow goes down (row increasing)"
+      },
+      "laneQuota": 18,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          4
+        ]
+      ],
+      "hardRocks": [
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          3
+        ]
+      ],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            0,
+            1
+          ]
+        },
+        "B": {
+          "narrowCol": 4,
+          "wideCols": [
+            4,
+            5
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 5",
+        "cols": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "note": "full bottom edge, same as M1"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 30
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 52
+            },
+            {
+              "source": "B",
+              "atSec": 66
+            }
+          ]
+        }
+      ],
+      "map": [
+        "#L##L#",
+        "#LHHL#",
+        "#LHHL#",
+        "#LHHL#",
+        "#LHHL#",
+        "#L##L#",
+        "EEEEEE"
+      ],
+      "intent": "center bedrock block forbids the M1 habit of merging inward; each source can only widen outward (A: col 0, B: col 5)",
+      "expectedPlay": "B wide ~30s: dig col 5 on preview; A wide ~52s: col 5 has collapsed (else SAFE-fill it), dig col 0; B wide ~66s: col 0 collapses or SAFE-fill, dig col 5",
+      "simStatus": "sim 300 seeds (hard rock modeled as tap-denied rock): d5 300, d2 300, d0 251, d-1 62, fixed 0/300; final acceptance after hardRocks is implemented"
+    },
+    {
+      "id": 3,
+      "name": {
+        "zh": "窄出口",
+        "en": "Tight Exit"
+      },
+      "grid": {
+        "cols": 6,
+        "rows": 7,
+        "origin": "top-left, col 0..5, row 0..6, flow goes down (row increasing)"
+      },
+      "laneQuota": 21,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            1,
+            2
+          ]
+        },
+        "B": {
+          "narrowCol": 4,
+          "wideCols": [
+            3,
+            4
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 6",
+        "cols": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "note": "NEW SEMANTICS: only these columns exit; cols 0 and 5 at row 6 are dead ends"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 32
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 55
+            },
+            {
+              "source": "A",
+              "atSec": 68
+            }
+          ]
+        }
+      ],
+      "map": [
+        "#L##L#",
+        "#L##L#",
+        "#L##L#",
+        "#L##L#",
+        "#L##L#",
+        "#L##L#",
+        "#L##L#",
+        "xEEEEx"
+      ],
+      "intent": "7 rows and an exit only under cols 1-4: the outer columns lead nowhere, so B must widen inward (col 3), not outward like board 1 (col 4->5 habit)",
+      "expectedPlay": "A wide ~32s: dig col 2 (7 cells); B wide ~55s: col 2 collapsed or SAFE-fill, dig col 3; A wide ~68s: col 3 collapses or SAFE-fill, dig col 2",
+      "simStatus": "proxy sim 300 seeds (7x7 grid with col 6 sealed; no cargo reaches cols 0/5 in scripted play so partial exit has no effect): d5 300, d2 300, d0 215, d-1 67, fixed 0/300; final acceptance after rectangular grid + partial exit are implemented"
+    },
+    {
+      "id": 4,
+      "name": {
+        "zh": "岔口",
+        "en": "The Fork"
+      },
+      "grid": {
+        "cols": 6,
+        "rows": 7,
+        "origin": "top-left, col 0..5, row 0..6, flow goes down (row increasing)"
+      },
+      "laneQuota": 22,
+      "presetLanes": [
+        [
+          0,
+          0
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "hardRocks": [
+        [
+          1,
+          0
+        ]
+      ],
+      "forks": [
+        {
+          "r": 0,
+          "c": 1,
+          "dir": "right"
+        }
+      ],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            2,
+            3
+          ]
+        },
+        "B": {
+          "narrowCol": 4,
+          "wideCols": [
+            4,
+            5
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 6",
+        "cols": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 32
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 52
+            },
+            {
+              "source": "A",
+              "atSec": 62
+            }
+          ]
+        }
+      ],
+      "map": [
+        "L>L#L#",
+        "H#L#L#",
+        "##L#L#",
+        "##L#L#",
+        "##L#L#",
+        "##L#L#",
+        "##L#L#",
+        "EEEEEE"
+      ],
+      "intent": "first fork: A's narrow loads enter on a fork at the gate [0,1]; arrow right sends them into lane col 2, arrow left into a one-cell dead end [0,0] (hard rock below). Wides like board 1: A [2,3] dig col 3, B [4,5] dig col 5",
+      "expectedPlay": "leave the fork pointing right; A wide ~32s dig col 3; B wide ~52s col 3 collapsed or SAFE-fill, dig col 5; A wide ~62s col 5 collapsed or SAFE-fill, dig col 3",
+      "failBRoute": "fork flipped left from the start, rest correct: one load at a time is caught in [0,0] (bounces pocket<->fork), times out every 20 s; 3rd timeout -> fail B at ~59.8 s"
+    },
+    {
+      "id": 5,
+      "name": {
+        "zh": "连发",
+        "en": "Back to Back"
+      },
+      "grid": {
+        "cols": 7,
+        "rows": 7,
+        "origin": "top-left, col 0..6, row 0..6, flow goes down (row increasing)"
+      },
+      "laneQuota": 21,
+      "presetLanes": [
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          2
+        ],
+        [
+          2,
+          2
+        ],
+        [
+          3,
+          2
+        ],
+        [
+          4,
+          2
+        ],
+        [
+          5,
+          2
+        ],
+        [
+          6,
+          2
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          6,
+          4
+        ]
+      ],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 2,
+          "wideCols": [
+            2,
+            3
+          ]
+        },
+        "B": {
+          "narrowCol": 4,
+          "wideCols": [
+            4,
+            5
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 6",
+        "cols": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 30
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 42
+            },
+            {
+              "source": "A",
+              "atSec": 54
+            },
+            {
+              "source": "A",
+              "atSec": 61
+            }
+          ]
+        }
+      ],
+      "map": [
+        "##L#L##",
+        "##L#L##",
+        "##L#L##",
+        "##L#L##",
+        "##L#L##",
+        "##L#L##",
+        "##L#L##",
+        "EEEEEEE"
+      ],
+      "intent": "B wide ~42s on the right (col 5), then two A wides ~54s and ~61s on the left (col 3). Quota is one column: col 5 must be refilled/collapsed right behind the B wide, then col 3 is kept open for both A wides",
+      "expectedPlay": "A wide ~30s dig col 3; B wide ~42s col 3 collapsed or SAFE-fill, dig col 5; A wide ~54s SAFE-fill col 5 behind the B wide, dig col 3, keep it for the second A wide ~61s"
+    },
+    {
+      "id": 6,
+      "name": {
+        "zh": "两个岔口",
+        "en": "Two Forks"
+      },
+      "grid": {
+        "cols": 7,
+        "rows": 7,
+        "origin": "top-left, col 0..6, row 0..6, flow goes down (row increasing)"
+      },
+      "laneQuota": 23,
+      "presetLanes": [
+        [
+          0,
+          0
+        ],
+        [
+          1,
+          0
+        ],
+        [
+          2,
+          0
+        ],
+        [
+          3,
+          0
+        ],
+        [
+          4,
+          0
+        ],
+        [
+          5,
+          0
+        ],
+        [
+          6,
+          0
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          3,
+          5
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          5
+        ],
+        [
+          6,
+          5
+        ]
+      ],
+      "hardRocks": [
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          3
+        ]
+      ],
+      "forks": [
+        {
+          "r": 0,
+          "c": 1,
+          "dir": "left"
+        },
+        {
+          "r": 0,
+          "c": 4,
+          "dir": "right"
+        }
+      ],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            0,
+            1
+          ]
+        },
+        "B": {
+          "narrowCol": 4,
+          "wideCols": [
+            5,
+            6
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 6",
+        "cols": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 35
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 47.5
+            },
+            {
+              "source": "B",
+              "atSec": 57.5
+            },
+            {
+              "source": "A",
+              "atSec": 67
+            }
+          ]
+        }
+      ],
+      "map": [
+        "L<LL>L#",
+        "L#HH#L#",
+        "L####L#",
+        "L####L#",
+        "L####L#",
+        "L####L#",
+        "L####L#",
+        "EEEEEEE"
+      ],
+      "intent": "two gate forks, two dead-end cells [0,2] [0,3] (hard rock below). A's wide lane is col 1 rows 1-6 right under A's fork: loads keep passing the fork, so it never collapses on its own and must be filled by hand; B's wide lane is the outer col 6 and collapses normally. 4 wides alternating B, A, B, A",
+      "expectedPlay": "keep A fork left, B fork right; B wide ~35s dig col 6; A wide ~47.5s SAFE-fill col 6 if still open, dig col 1 rows 1-6; B wide ~57.5s SAFE-fill col 1 rows 1-6 by hand (it will not collapse; hint shows at this preview), dig col 6; A wide ~67s SAFE-fill col 6, dig col 1",
+      "failBRoute": "A fork flipped right from the start: fail B ~59.8 s; B fork flipped left: fail B ~79 s; both flipped: fail B",
+      "hint": {
+        "id": "forkLaneNoCollapse",
+        "trigger": "widePreview",
+        "source": "B",
+        "nth": 2,
+        "once": true,
+        "text": {
+          "zh": "岔口下的巷不会塌，点它填回",
+          "en": "Lanes under a fork won't collapse. Tap to fill them back."
+        }
+      }
+    },
+    {
+      "id": 7,
+      "name": {
+        "zh": "三个货源",
+        "en": "Three Gates"
+      },
+      "grid": {
+        "cols": 7,
+        "rows": 8,
+        "origin": "top-left, col 0..6, row 0..7, flow goes down (row increasing)"
+      },
+      "laneQuota": 32,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          7,
+          1
+        ],
+        [
+          0,
+          3
+        ],
+        [
+          1,
+          3
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          3
+        ],
+        [
+          6,
+          3
+        ],
+        [
+          7,
+          3
+        ],
+        [
+          0,
+          5
+        ],
+        [
+          1,
+          5
+        ],
+        [
+          2,
+          5
+        ],
+        [
+          3,
+          5
+        ],
+        [
+          4,
+          5
+        ],
+        [
+          5,
+          5
+        ],
+        [
+          6,
+          5
+        ],
+        [
+          7,
+          5
+        ]
+      ],
+      "hardRocks": [],
+      "forks": [],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            1,
+            2
+          ]
+        },
+        "B": {
+          "narrowCol": 5,
+          "wideCols": [
+            4,
+            5
+          ]
+        },
+        "C": {
+          "narrowCol": 3,
+          "wideCols": [
+            2,
+            3
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 7",
+        "cols": [
+          0,
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "note": "full bottom edge"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "C",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 32
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "C",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "C",
+              "atSec": 54
+            },
+            {
+              "source": "B",
+              "atSec": 64.5
+            }
+          ]
+        }
+      ],
+      "map": [
+        "#L#L#L#",
+        "#L#L#L#",
+        "#L#L#L#",
+        "#L#L#L#",
+        "#L#L#L#",
+        "#L#L#L#",
+        "#L#L#L#",
+        "#L#L#L#",
+        "EEEEEEE"
+      ],
+      "intent": "three gates, never more than two shipping: wave 1 A, wave 2 A + C (middle), wave 3 C + B (A stops). Wide mouths move: A [1,2] col 2, C [2,3] col 2 (same column, new mouth), B [4,5] col 4",
+      "expectedPlay": "A wide ~32s dig col 2; C wide ~54s col 2 again (re-dig if collapsed); B wide ~64.5s SAFE-fill col 2, dig col 4"
+    },
+    {
+      "id": 8,
+      "name": {
+        "zh": "全都来",
+        "en": "All at Once"
+      },
+      "grid": {
+        "cols": 7,
+        "rows": 8,
+        "origin": "top-left, col 0..6, row 0..7, flow goes down (row increasing)"
+      },
+      "laneQuota": 25,
+      "presetLanes": [
+        [
+          0,
+          1
+        ],
+        [
+          1,
+          1
+        ],
+        [
+          2,
+          1
+        ],
+        [
+          3,
+          1
+        ],
+        [
+          4,
+          1
+        ],
+        [
+          5,
+          1
+        ],
+        [
+          6,
+          1
+        ],
+        [
+          7,
+          1
+        ],
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          4
+        ],
+        [
+          2,
+          4
+        ],
+        [
+          3,
+          4
+        ],
+        [
+          4,
+          4
+        ],
+        [
+          5,
+          4
+        ],
+        [
+          6,
+          4
+        ],
+        [
+          7,
+          4
+        ],
+        [
+          0,
+          6
+        ]
+      ],
+      "hardRocks": [
+        [
+          1,
+          6
+        ],
+        [
+          2,
+          3
+        ],
+        [
+          3,
+          3
+        ],
+        [
+          4,
+          3
+        ],
+        [
+          5,
+          3
+        ]
+      ],
+      "forks": [
+        {
+          "r": 0,
+          "c": 5,
+          "dir": "left"
+        }
+      ],
+      "sources": {
+        "A": {
+          "narrowCol": 1,
+          "wideCols": [
+            1,
+            2
+          ]
+        },
+        "B": {
+          "narrowCol": 5,
+          "wideCols": [
+            4,
+            5
+          ]
+        }
+      },
+      "exit": {
+        "row": "below 7",
+        "cols": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "note": "only these columns exit"
+      },
+      "waves": [
+        {
+          "wave": 1,
+          "tStart": 0,
+          "tEnd": 20,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.6,
+              "firstAtSec": 0.5
+            }
+          ],
+          "wide": []
+        },
+        {
+          "wave": 2,
+          "tStart": 20,
+          "tEnd": 45,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.4,
+              "firstAtSec": 20
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.4,
+              "firstAtSec": 20.7
+            }
+          ],
+          "wide": [
+            {
+              "source": "B",
+              "atSec": 31
+            },
+            {
+              "source": "A",
+              "atSec": 44
+            }
+          ]
+        },
+        {
+          "wave": 3,
+          "tStart": 45,
+          "tEnd": 75,
+          "narrow": [
+            {
+              "source": "A",
+              "intervalSec": 1.2,
+              "firstAtSec": 45
+            },
+            {
+              "source": "B",
+              "intervalSec": 1.2,
+              "firstAtSec": 45.6
+            }
+          ],
+          "wide": [
+            {
+              "source": "A",
+              "atSec": 50
+            },
+            {
+              "source": "B",
+              "atSec": 62
+            }
+          ]
+        }
+      ],
+      "map": [
+        "#L##L<L",
+        "#L##L#H",
+        "#L#HL##",
+        "#L#HL##",
+        "#L#HL##",
+        "#L#HL##",
+        "#L##L##",
+        "#L##L##",
+        "xEEEEEx"
+      ],
+      "intent": "combo: bedrock col 3 rows 2-5; exit only under cols 1-5; B's loads enter on a fork [0,5] (left to lane col 4, right into dead end [0,6] over hard rock, col 6 has no exit); 4 wides B, A, A, B: col 5 under the fork never collapses, so leaving it is always a hand fill",
+      "expectedPlay": "keep the fork left; B wide ~31s dig col 5 rows 1-7 (fork cell is a lane for the wide); A wide ~44s SAFE-fill col 5, dig col 2; A wide ~50s keep col 2 (re-dig a fallen cell); B wide ~62s SAFE-fill col 2, dig col 5",
+      "failBRoute": "fork flipped right from the start: fail B at ~80-81.3 s, before any fail A"
+    }
+  ]
+}
